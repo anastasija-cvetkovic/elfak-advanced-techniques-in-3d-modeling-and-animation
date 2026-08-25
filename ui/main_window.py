@@ -64,7 +64,7 @@ class UploadZone(QFrame):
         icon.setStyleSheet("font-size:26px; color:#4a5080; background:transparent;")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        txt = QLabel("Prevucite .max fajl ovde")
+        txt = QLabel("Prevucite ASCII .txt fajl ovde")
         txt.setStyleSheet("font-size:14px; font-weight:500; color:#ccc; background:transparent;")
         txt.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -74,20 +74,26 @@ class UploadZone(QFrame):
 
         lv.addWidget(icon); lv.addWidget(txt); lv.addWidget(sub)
 
+    def _set_drag_active(self, active: bool):
+        self.setProperty("dragActive", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
     def dragEnterEvent(self, e: QDragEnterEvent):
-        if e.mimeData().hasUrls():
-            urls = e.mimeData().urls()
-            if any(u.toLocalFile().lower().endswith(('.txt', '.max')) for u in urls):
-                self.setStyleSheet(self.styleSheet() + "border-color:#4a7adf;")
-                e.acceptProposedAction()
+        if e.mimeData().hasUrls() and any(
+            u.toLocalFile().lower().endswith('.txt') for u in e.mimeData().urls()
+        ):
+            self._set_drag_active(True)
+            e.acceptProposedAction()
 
     def dragLeaveEvent(self, e):
-        self.setStyleSheet(self.objectName())
+        self._set_drag_active(False)
 
     def dropEvent(self, e: QDropEvent):
+        self._set_drag_active(False)
         for url in e.mimeData().urls():
             path = url.toLocalFile()
-            if path.lower().endswith(('.txt', '.max')):
+            if path.lower().endswith('.txt'):
                 self.file_dropped.emit(path)
                 break
         e.acceptProposedAction()
@@ -169,7 +175,8 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self):
         root = QWidget()
-        root.setStyleSheet("background:#1a1c23;")
+        root.setObjectName("rootPanel")
+        root.setStyleSheet("QWidget#rootPanel { background:#1a1c23; }")
         self.setCentralWidget(root)
 
         hv = QHBoxLayout(root)
@@ -183,8 +190,11 @@ class MainWindow(QMainWindow):
     # ── LEVI PANEL ────────────────────────────────────────────────────
     def _build_left(self):
         w = QWidget()
+        w.setObjectName("leftPanel")
         w.setFixedWidth(300)
-        w.setStyleSheet("background:#1a1c23; border-right:1px solid #2e3140;")
+        w.setStyleSheet(
+            "QWidget#leftPanel { background:#1a1c23; border-right:1px solid #2e3140; }"
+        )
 
         lv = QVBoxLayout(w)
         lv.setContentsMargins(0, 0, 0, 0)
@@ -192,7 +202,10 @@ class MainWindow(QMainWindow):
 
         # Naslov
         header = QWidget()
-        header.setStyleSheet("background:#252830; border-bottom:1px solid #2e3140;")
+        header.setObjectName("leftHeader")
+        header.setStyleSheet(
+            "QWidget#leftHeader { background:#252830; border-bottom:1px solid #2e3140; }"
+        )
         hh = QHBoxLayout(header)
         hh.setContentsMargins(16, 14, 16, 14); hh.setSpacing(10)
         icon = QLabel("⬡")
@@ -260,10 +273,10 @@ class MainWindow(QMainWindow):
         lv.addWidget(_section_label("OPTIMIZACIJA MREŽE"))
 
         row = QHBoxLayout()
-        lbl = QLabel("Smanjenje tacaka")
+        lbl = QLabel("Jačina smanjenja")
         lbl.setStyleSheet(
             "font-size:13px; font-weight:500; color:#e0e0e0; background:transparent;")
-        self.lbl_ratio = QLabel("70%")
+        self.lbl_ratio = QLabel("−70%")
         self.lbl_ratio.setStyleSheet(
             "font-size:13px; font-weight:500; color:#fff; "
             "background:#2e3140; border-radius:12px; padding:2px 8px;")
@@ -272,12 +285,12 @@ class MainWindow(QMainWindow):
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(5, 95); self.slider.setValue(70)
-        self.slider.valueChanged.connect(lambda v: self.lbl_ratio.setText(f"{v}%"))
+        self.slider.valueChanged.connect(self._on_slider_changed)
         lv.addWidget(self.slider)
 
-        hint = QLabel("Manji % = više detalja, veći fajl")
-        hint.setStyleSheet("font-size:11px; color:#555; background:transparent;")
-        lv.addWidget(hint)
+        self.lbl_hint = QLabel("Zadržava se ~30% trouglova")
+        self.lbl_hint.setStyleSheet("font-size:11px; color:#555; background:transparent;")
+        lv.addWidget(self.lbl_hint)
 
         lv.addWidget(_section_label("METODA DECIMACIJE"))
 
@@ -285,18 +298,10 @@ class MainWindow(QMainWindow):
         self.rb_cluster = QRadioButton("Vertex Clustering")
         self.rb_qec.setChecked(True)
 
-        row2 = QHBoxLayout(); row2.setSpacing(6)
-        row2.addWidget(self.rb_qec)
-        tag = QLabel("(preporučeno)")
-        tag.setStyleSheet("font-size:11px; color:#555; background:transparent;")
-        row2.addWidget(tag); row2.addStretch()
-
         self._rbg = QButtonGroup(self)
         for rb in (self.rb_qec, self.rb_cluster):
             self._rbg.addButton(rb)
-
-        lv.addLayout(row2)
-        lv.addWidget(self.rb_cluster)
+            lv.addWidget(rb)
         return w
 
     def _section_prikaz(self):
@@ -350,13 +355,18 @@ class MainWindow(QMainWindow):
 
     # ── DESNI PANEL ───────────────────────────────────────────────────
     def _build_right(self):
-        w = QWidget(); w.setStyleSheet("background:#12141a;")
+        w = QWidget()
+        w.setObjectName("rightPanel")
+        w.setStyleSheet("QWidget#rightPanel { background:#12141a; }")
         lv = QVBoxLayout(w); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(0)
 
         # Viewer toolbar
         vtb = QWidget()
+        vtb.setObjectName("viewerToolbar")
         vtb.setFixedHeight(46)
-        vtb.setStyleSheet("background:#12141a; border-bottom:1px solid #2e3140;")
+        vtb.setStyleSheet(
+            "QWidget#viewerToolbar { background:#12141a; border-bottom:1px solid #2e3140; }"
+        )
         vth = QHBoxLayout(vtb)
         vth.setContentsMargins(16, 8, 16, 8); vth.setSpacing(8)
         lbl3d = QLabel("3D prikaz")
@@ -384,23 +394,21 @@ class MainWindow(QMainWindow):
 
     def _build_stats_bar(self):
         bar = QWidget()
+        bar.setObjectName("statsBar")
         bar.setFixedHeight(70)
-        bar.setStyleSheet("background:#1a1c23; border-top:1px solid #2e3140;")
+        bar.setStyleSheet(
+            "QWidget#statsBar { background:#1a1c23; border-top:1px solid #2e3140; }"
+        )
         hv = QHBoxLayout(bar)
-        hv.setContentsMargins(20, 8, 20, 8); hv.setSpacing(0)
+        hv.setContentsMargins(20, 8, 20, 8); hv.setSpacing(24)
 
         self.s_orig  = StatBlock("ORIGINALNE TAČKE")
         self.s_after = StatBlock("NAKON OPTIMIZACIJE")
         self.s_tris  = StatBlock("TROUGLOVI")
         self.s_err   = StatBlock("GREŠKA OBLIKA")
 
-        for i, s in enumerate((self.s_orig, self.s_after, self.s_tris, self.s_err)):
+        for s in (self.s_orig, self.s_after, self.s_tris, self.s_err):
             hv.addWidget(s, stretch=1)
-            if i < 3:
-                sep = QFrame()
-                sep.setFrameShape(QFrame.Shape.VLine)
-                sep.setStyleSheet("color:#2e3140; background:#2e3140; max-width:1px;")
-                hv.addWidget(sep)
         return bar
 
     # ── Status bar ────────────────────────────────────────────────────
@@ -443,6 +451,11 @@ class MainWindow(QMainWindow):
             self.s_after.set_value("—")
             self.s_tris.set_value(f"{of:,}" if of else "—")
             self.s_err.set_value("—")
+
+    # ── Slajder ──────────────────────────────────────────────────────
+    def _on_slider_changed(self, v: int):
+        self.lbl_ratio.setText(f"−{v}%")
+        self.lbl_hint.setText(f"Zadržava se ~{100 - v}% trouglova")
 
     # ── Učitavanje fajla ─────────────────────────────────────────────
     def _on_drop_or_click(self, path: str):

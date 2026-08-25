@@ -51,6 +51,11 @@ QFrame#uploadZone:hover {
     background: #22263a;
 }
 
+QFrame#uploadZone[dragActive="true"] {
+    border-color: #4a7adf;
+    background: #253055;
+}
+
 /* Fajl info kartica */
 QFrame#fileCard {
     background: #252830;

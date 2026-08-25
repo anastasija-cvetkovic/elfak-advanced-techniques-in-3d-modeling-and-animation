@@ -187,10 +187,6 @@ class MeshViewer(QWidget):
             self._render(self.pl_after, self._dec_verts, self._dec_faces,
                          "#e07060", "#8a3020")
 
-    # Kompatibilnost sa starim pozivima iz main_window
-    def set_wireframe(self, enabled: bool) -> None:
-        self.set_display_mode("wireframe" if enabled else "solid")
-
     def clear_after(self) -> None:
         if PYVISTA_OK:
             self._dec_verts = self._dec_faces = None
