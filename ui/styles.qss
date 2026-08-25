@@ -182,17 +182,18 @@ QPushButton#btnObj {
 }
 
 /* Progress */
-QProgressBar {
+QProgressBar#workProgress {
     background: #2e3140;
     border: none;
-    border-radius: 2px;
-    height: 4px;
+    border-radius: 3px;
+    min-height: 6px;
+    max-height: 6px;
     color: transparent;
 }
 
-QProgressBar::chunk {
+QProgressBar#workProgress::chunk {
     background: #4a7adf;
-    border-radius: 2px;
+    border-radius: 3px;
 }
 
 /* Status bar */

@@ -2,6 +2,14 @@
 ui/viewer_widget.py
 MeshViewer — dva PyVista QtInteractor-a jedan pored drugog (before/after).
 Modovi prikaza: "solid" (surface + ivice), "smooth" (surface bez ivica), "wireframe"
+
+Optimizacije:
+  • PolyData se pravi jednom po učitavanju i keš-ira (bez rekreacije pri
+    svakom mode switch-u).
+  • Verzija sa normalama (za smooth mode) se računa lazy — tek prvi put
+    kad korisnik pređe u smooth mode.
+  • reset_camera se poziva samo pri promeni podataka, ne pri mode switch-u
+    (bolji UX — rotacija se ne gubi).
 """
 
 from __future__ import annotations
@@ -48,6 +56,11 @@ _MODE_CFG = {
     "wireframe": ("wireframe", False, False),
 }
 
+_COLORS = {
+    "orig": ("#4a9edd", "#1a4a7a"),   # (fill, edge)
+    "dec":  ("#e07060", "#8a3020"),
+}
+
 
 class MeshViewer(QWidget):
     """
@@ -58,8 +71,14 @@ class MeshViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._mode = "solid"
-        self._orig_verts = self._orig_faces = None
-        self._dec_verts  = self._dec_faces  = None
+
+        # Keš PolyData objekata — jedan po strani, plus opciono
+        # verzija sa normalama za smooth mode (lazy).
+        self._orig_pd:        "pv.PolyData | None" = None
+        self._orig_pd_smooth: "pv.PolyData | None" = None
+        self._dec_pd:         "pv.PolyData | None" = None
+        self._dec_pd_smooth:  "pv.PolyData | None" = None
+
         self._build_ui()
 
     def _build_ui(self):
@@ -98,100 +117,121 @@ class MeshViewer(QWidget):
     # ── Interna pomoć ─────────────────────────────────────────────────
 
     @staticmethod
-    def _to_polydata(verts: list, faces: list) -> "pv.PolyData":
-        pts   = np.array(verts, dtype=np.float64)
-        cells = np.hstack([
-            np.full((len(faces), 1), 3, dtype=np.int32),
-            np.array(faces, dtype=np.int32),
-        ]).flatten()
-        return pv.PolyData(pts, cells)
+    def _to_polydata(verts: np.ndarray, faces: np.ndarray) -> "pv.PolyData":
+        """
+        Pravi PyVista PolyData bez suvišnih kopija.
+        """
+        pts = np.ascontiguousarray(verts, dtype=np.float64)
+        f   = np.ascontiguousarray(faces, dtype=np.int32)
 
-    def _render(self, plotter, verts, faces, color, edge_color):
-        """Crta mesh na zadatom ploteru prema trenutnom modu."""
+        # PyVista očekuje flat cells: [3, i, j, k, 3, i, j, k, …]
+        n = len(f)
+        cells = np.empty((n, 4), dtype=np.int32)
+        cells[:, 0]  = 3
+        cells[:, 1:] = f
+        return pv.PolyData(pts, cells.reshape(-1))
+
+    def _get_polydata(self, side: str) -> "pv.PolyData | None":
+        """
+        Vraća PolyData za zadatu stranu ("orig" ili "dec") — sa normalama
+        ako je trenutni mod smooth (lazy izračunato i keširano).
+        """
+        need_normals = (self._mode == "smooth")
+        if side == "orig":
+            base = self._orig_pd
+            if not need_normals:
+                return base
+            if self._orig_pd_smooth is None and base is not None:
+                self._orig_pd_smooth = base.compute_normals(
+                    auto_orient_normals=True,
+                    consistent_normals=True,
+                    split_vertices=False,
+                )
+            return self._orig_pd_smooth
+        else:
+            base = self._dec_pd
+            if not need_normals:
+                return base
+            if self._dec_pd_smooth is None and base is not None:
+                self._dec_pd_smooth = base.compute_normals(
+                    auto_orient_normals=True,
+                    consistent_normals=True,
+                    split_vertices=False,
+                )
+            return self._dec_pd_smooth
+
+    def _render(self, plotter, side: str, reset_camera: bool = False):
+        """Crta keširani mesh na zadatom ploteru prema trenutnom modu."""
+        mesh = self._get_polydata(side)
+        if mesh is None:
+            return
+
+        color, edge_color = _COLORS[side]
         style, show_edges, smooth = _MODE_CFG[self._mode]
-        mesh = self._to_polydata(verts, faces)
         plotter.clear()
 
         if self._mode == "smooth":
-            # Izračunaj normalne za glatko senčenje
-            mesh = mesh.compute_normals(
-                auto_orient_normals=True,
-                consistent_normals=True,
-                split_vertices=False,
-            )
             # Camera-relative 3-point lighting — prati kameru pri rotaciji
             plotter.remove_all_lights()
-            key = pv.Light(position=(1.2, 1.0, 1.5), focal_point=(0, 0, 0),
-                           intensity=1.0)
-            key.light_type = pv.Light.CAMERA_LIGHT
-            fill = pv.Light(position=(-1.5, 0.5, 0.5), focal_point=(0, 0, 0),
-                            intensity=0.5)
-            fill.light_type = pv.Light.CAMERA_LIGHT
-            rim = pv.Light(position=(0.0, -1.0, -0.8), focal_point=(0, 0, 0),
-                           intensity=0.25)
-            rim.light_type = pv.Light.CAMERA_LIGHT
+            key  = pv.Light(position=(1.2,  1.0,  1.5), focal_point=(0, 0, 0), intensity=1.0)
+            fill = pv.Light(position=(-1.5, 0.5,  0.5), focal_point=(0, 0, 0), intensity=0.5)
+            rim  = pv.Light(position=(0.0, -1.0, -0.8), focal_point=(0, 0, 0), intensity=0.25)
             for light in (key, fill, rim):
+                light.light_type = pv.Light.CAMERA_LIGHT
                 plotter.add_light(light)
             plotter.add_mesh(
-                mesh,
-                style="surface",
-                color=color,
-                show_edges=False,
-                smooth_shading=True,
-                ambient=0.1,
-                diffuse=0.8,
-                specular=0.5,
-                specular_power=40,
+                mesh, style="surface", color=color,
+                show_edges=False, smooth_shading=True,
+                ambient=0.1, diffuse=0.8, specular=0.5, specular_power=40,
             )
         else:
-            # Standardno lightkit osvetljenje za solid/wireframe
             plotter.enable_lightkit()
             plotter.add_mesh(
-                mesh,
-                style=style,
-                color=color,
-                show_edges=show_edges,
-                edge_color=edge_color,
-                line_width=0.8,
-                smooth_shading=smooth,
+                mesh, style=style, color=color,
+                show_edges=show_edges, edge_color=edge_color,
+                line_width=0.8, smooth_shading=smooth,
             )
 
-        plotter.reset_camera()
+        if reset_camera:
+            plotter.reset_camera()
 
     # ── Javni API ─────────────────────────────────────────────────────
 
-    def show_original(self, verts: list, faces: list) -> None:
+    def show_original(self, verts: np.ndarray, faces: np.ndarray) -> None:
         if not PYVISTA_OK:
             return
-        self._orig_verts, self._orig_faces = verts, faces
-        self._render(self.pl_before, verts, faces, "#4a9edd", "#1a4a7a")
+        # Nova podataka → nov keš, invalidiraj smooth verziju
+        self._orig_pd = self._to_polydata(verts, faces)
+        self._orig_pd_smooth = None
+        self._render(self.pl_before, "orig", reset_camera=True)
 
-    def show_decimated(self, verts: list, faces: list) -> None:
+    def show_decimated(self, verts: np.ndarray, faces: np.ndarray) -> None:
         if not PYVISTA_OK:
             return
-        self._dec_verts, self._dec_faces = verts, faces
-        self._render(self.pl_after, verts, faces, "#e07060", "#8a3020")
+        self._dec_pd = self._to_polydata(verts, faces)
+        self._dec_pd_smooth = None
+        self._render(self.pl_after, "dec", reset_camera=True)
 
     def set_display_mode(self, mode: str) -> None:
         """
         Prebacuje mod prikaza: 'solid' | 'smooth' | 'wireframe'.
-        Automatski osvežava oba panela ako su meshevi učitani.
+        Ne resetuje kameru — korisnik zadržava trenutni pogled.
         """
         if not PYVISTA_OK or mode not in _MODE_CFG:
             return
         self._mode = mode
-        if self._orig_verts is not None:
-            self._render(self.pl_before, self._orig_verts, self._orig_faces,
-                         "#4a9edd", "#1a4a7a")
-        if self._dec_verts is not None:
-            self._render(self.pl_after, self._dec_verts, self._dec_faces,
-                         "#e07060", "#8a3020")
+        if self._orig_pd is not None:
+            self._render(self.pl_before, "orig", reset_camera=False)
+        if self._dec_pd is not None:
+            self._render(self.pl_after, "dec", reset_camera=False)
 
     def clear_after(self) -> None:
-        if PYVISTA_OK:
-            self._dec_verts = self._dec_faces = None
-            self.pl_after.clear()
-            self.pl_after.render()
+        if not PYVISTA_OK:
+            return
+        self._dec_pd = None
+        self._dec_pd_smooth = None
+        self.pl_after.clear()
+        self.pl_after.render()
 
     def reset_cameras(self) -> None:
         if PYVISTA_OK:

@@ -1,62 +1,63 @@
 """
 core/converter.py
 Učitavanje i čuvanje ASCII mesh fajlova + poziv 3ds Max headless.
+
+Format:
+    n_verts
+    n_faces
+    x y z   (n_verts redova)
+    a b c   (n_faces redova, 0-based indeksi)
+
+Sav I/O radi na numpy nizovima radi brzine (10-100× brže od Python for petlji
+za velike mesh-eve).
 """
 
+from __future__ import annotations
 import subprocess
 import os
-from pathlib import Path
+import numpy as np
 
 
-def load_mesh(path: str) -> tuple[list, list]:
+def load_mesh(path: str) -> tuple[np.ndarray, np.ndarray]:
     """
-    Čita ASCII mesh fajl u formatu:
-        n_verts
-        n_faces
-        x y z   (za svaku tačku)
-        a b c   (za svaki trougao, 0-based indeksi)
-    Vraća (verts, faces) kao liste listi.
+    Čita ASCII mesh fajl i vraća:
+        verts — np.ndarray oblika (N, 3), dtype float64
+        faces — np.ndarray oblika (M, 3), dtype int32
     """
     with open(path, "r") as f:
-        lines = [ln.strip() for ln in f if ln.strip()]
+        n_verts = int(f.readline())
+        n_faces = int(f.readline())
+        verts = np.loadtxt(f, dtype=np.float64, max_rows=n_verts)
+        faces = np.loadtxt(f, dtype=np.int32,   max_rows=n_faces)
 
-    idx = 0
-    n_verts = int(lines[idx]); idx += 1
-    n_faces = int(lines[idx]); idx += 1
-
-    verts = []
-    for _ in range(n_verts):
-        x, y, z = map(float, lines[idx].split()); idx += 1
-        verts.append([x, y, z])
-
-    faces = []
-    for _ in range(n_faces):
-        a, b, c = map(int, lines[idx].split()); idx += 1
-        faces.append([a, b, c])
+    # np.loadtxt vraća 1D niz kad je samo jedan red — normalizuj u 2D
+    if verts.ndim == 1:
+        verts = verts.reshape(-1, 3)
+    if faces.ndim == 1:
+        faces = faces.reshape(-1, 3)
 
     return verts, faces
 
 
-def save_mesh(path: str, verts: list, faces: list) -> None:
+def save_mesh(path: str, verts: np.ndarray, faces: np.ndarray) -> None:
     """
-    Čuva mesh u ASCII formatu.
+    Čuva mesh u ASCII formatu. Prima np.ndarray (ili bilo šta što se može
+    konvertovati u ndarray).
     """
+    verts = np.asarray(verts, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int32)
+
     with open(path, "w") as f:
         f.write(f"{len(verts)}\n")
         f.write(f"{len(faces)}\n")
-        for v in verts:
-            f.write(f"{v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
-        for t in faces:
-            f.write(f"{t[0]} {t[1]} {t[2]}\n")
+        np.savetxt(f, verts, fmt="%.6f")
+        np.savetxt(f, faces, fmt="%d")
 
 
 def export_from_max(max_exe: str, ms_script: str) -> None:
     """
     Pokreće 3ds Max sa MaxScript-om koji exportuje aktivnu scenu u ASCII.
     Non-blocking — 3ds Max se otvara, korisnik bira gde da sačuva.
-
-    max_exe   — putanja do 3dsmax.exe
-    ms_script — putanja do export_ascii.ms
     """
     if not os.path.exists(max_exe):
         raise FileNotFoundError(f"3ds Max nije pronađen: {max_exe}")

@@ -1,7 +1,9 @@
 """
 core/decimator.py
 Decimacija mesh-a sa chain fallback strategijom:
-  pyfqmr → qem_decimate → vertex_clustering
+  pyfqmr → fast_simplification (QEM) → vertex_clustering
+
+Sav I/O radi na numpy nizovima za brzinu i konzistentnost.
 """
 
 from __future__ import annotations
@@ -9,23 +11,24 @@ import numpy as np
 
 
 def decimate(
-    verts: list,
-    faces: list,
+    verts: np.ndarray,
+    faces: np.ndarray,
     ratio: float,
     method: str = "auto",
-) -> tuple[list, list]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Smanjuje broj trouglova uz očuvanje oblika.
 
     Parametri
     ---------
-    verts   — lista [x, y, z] tačaka
-    faces   — lista [a, b, c] indeksa trouglova
+    verts   — np.ndarray (N, 3) float
+    faces   — np.ndarray (M, 3) int
     ratio   — 0.0–1.0; 0.5 = 50% originalnog broja trouglova
-    method  — "auto" | "pyfqmr" | "qem" | "cluster"
-
-    Vraća (verts, faces) kao liste listi.
+    method  — "auto" | "pyfqmr" | "qem" | "cluster" | "uniform"
     """
+    verts = np.asarray(verts, dtype=np.float64)
+    faces = np.asarray(faces, dtype=np.int32)
+
     if ratio >= 1.0:
         return verts, faces
 
@@ -34,13 +37,13 @@ def decimate(
 
     if method == "pyfqmr":
         result = _try_pyfqmr(verts, faces, target_f)
-        if result:
+        if result is not None:
             return result
         raise RuntimeError("pyfqmr nije dostupan ili nije uspio.")
 
     if method == "qem":
         result = _try_qem(verts, faces, target_f)
-        if result:
+        if result is not None:
             return result
         raise RuntimeError("QEM decimacija nije uspela.")
 
@@ -49,20 +52,20 @@ def decimate(
 
     if method == "uniform":
         result = _uniform_remesh(verts, faces, target_v)
-        if result:
+        if result is not None:
             return result
         result = _try_pyfqmr(verts, faces, target_f)
-        if result:
+        if result is not None:
             return result
         return _vertex_clustering(verts, faces, target_v)
 
     # auto — proba redom, uvek završi
     result = _try_pyfqmr(verts, faces, target_f)
-    if result:
+    if result is not None:
         return result
 
     result = _try_qem(verts, faces, target_f)
-    if result:
+    if result is not None:
         return result
 
     return _vertex_clustering(verts, faces, target_v)
@@ -71,8 +74,8 @@ def decimate(
 # ── Implementacije ────────────────────────────────────────────────────────────
 
 def _try_pyfqmr(
-    verts: list, faces: list, target_faces: int
-) -> tuple[list, list] | None:
+    verts: np.ndarray, faces: np.ndarray, target_faces: int
+) -> tuple[np.ndarray, np.ndarray] | None:
     """
     Quadric Edge Collapse — pyfqmr.
     Čuva konture zahvaljujući preserve_border=True.
@@ -82,8 +85,8 @@ def _try_pyfqmr(
 
         s = pyfqmr.Simplify()
         s.setMesh(
-            np.array(verts, dtype=np.float64),
-            np.array(faces, dtype=np.int32),
+            np.ascontiguousarray(verts, dtype=np.float64),
+            np.ascontiguousarray(faces, dtype=np.int32),
         )
         s.simplify_mesh(
             target_count=target_faces,
@@ -92,7 +95,7 @@ def _try_pyfqmr(
             verbose=False,
         )
         v, f, _ = s.getMesh()
-        return v.tolist(), f.tolist()
+        return np.asarray(v, dtype=np.float64), np.asarray(f, dtype=np.int32)
 
     except ImportError:
         return None
@@ -101,34 +104,32 @@ def _try_pyfqmr(
 
 
 def _try_qem(
-    verts: list, faces: list, target_faces: int
-) -> tuple[list, list] | None:
+    verts: np.ndarray, faces: np.ndarray, target_faces: int
+) -> tuple[np.ndarray, np.ndarray] | None:
     """
     QEM implementacija iz fast_simplification (ako je instaliran).
     """
     try:
         import fast_simplification as fs
-        import numpy as np
 
-        pts = np.array(verts, dtype=np.float64)
-        cells = np.hstack(
-            [np.full((len(faces), 1), 3), np.array(faces, dtype=np.int32)]
-        ).flatten()
+        # fast_simplification očekuje flat cells niz sa vodećom brojkom 3
+        n = len(faces)
+        cells = np.empty((n, 4), dtype=np.int32)
+        cells[:, 0]  = 3
+        cells[:, 1:] = faces
+        cells = cells.flatten()
 
         target_ratio = 1.0 - (target_faces / max(1, len(faces)))
         target_ratio = float(np.clip(target_ratio, 0.0, 0.99))
 
-        pts_out, cells_out = fs.simplify(pts, cells, target_reduction=target_ratio)
+        pts_out, cells_out = fs.simplify(
+            verts.astype(np.float64), cells, target_reduction=target_ratio
+        )
 
-        faces_out = []
-        i = 0
-        while i < len(cells_out):
-            n = cells_out[i]; i += 1
-            if n == 3:
-                faces_out.append(cells_out[i:i+3].tolist())
-            i += n
-
-        return pts_out.tolist(), faces_out
+        # cells_out je varijadičan format: [3, i, j, k, 3, i, j, k, ...]
+        # jer smo poslali samo trouglove, možemo direktno da reshape-ujemo
+        faces_out = cells_out.reshape(-1, 4)[:, 1:].astype(np.int32)
+        return np.asarray(pts_out, dtype=np.float64), faces_out
 
     except ImportError:
         return None
@@ -137,45 +138,43 @@ def _try_qem(
 
 
 def _uniform_remesh(
-    verts: list, faces: list, target_verts: int
-) -> tuple[list, list] | None:
+    verts: np.ndarray, faces: np.ndarray, target_verts: int
+) -> tuple[np.ndarray, np.ndarray] | None:
     """
     Uniform remesh via PyVista decimate + laplacian smooth.
     Daje ravnomernije raspoređene trouglove od QEC.
     """
     try:
         import pyvista as pv
-        import numpy as np
 
-        pts   = np.array(verts, dtype=np.float64)
-        cells = np.hstack([
-            np.full((len(faces), 1), 3, dtype=np.int32),
-            np.array(faces, dtype=np.int32),
-        ]).flatten()
-        mesh = pv.PolyData(pts, cells).clean().triangulate()
+        n = len(faces)
+        cells = np.empty((n, 4), dtype=np.int32)
+        cells[:, 0]  = 3
+        cells[:, 1:] = faces
+        cells = cells.flatten()
+        mesh = pv.PolyData(verts, cells).clean().triangulate()
 
-        target_red = float(np.clip(1.0 - target_verts / max(1, len(verts)), 0.01, 0.99))
-        remeshed   = mesh.decimate(target_red, volume_preservation=True)
-        remeshed   = remeshed.smooth(n_iter=30, relaxation_factor=0.1)
+        target_red = float(
+            np.clip(1.0 - target_verts / max(1, len(verts)), 0.01, 0.99)
+        )
+        remeshed = mesh.decimate(target_red, volume_preservation=True)
+        remeshed = remeshed.smooth(n_iter=30, relaxation_factor=0.1)
 
-        f_np = remeshed.faces.reshape(-1, 4)
-        return remeshed.points.tolist(), f_np[:, 1:].tolist()
+        f_np = remeshed.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        return np.asarray(remeshed.points, dtype=np.float64), f_np
     except Exception:
         return None
 
 
 def _vertex_clustering(
-    verts: list, faces: list, target_verts: int
-) -> tuple[list, list]:
+    verts: np.ndarray, faces: np.ndarray, target_verts: int
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Vertex clustering — fallback koji ne zahteva nikakve biblioteke.
     Grupiše tačke u voksel grid i zamenjuje ih centroidima.
     """
-    pts = np.array(verts, dtype=np.float64)
-    fcs = np.array(faces, dtype=np.int32)
-
-    bbox_min = pts.min(axis=0)
-    bbox_max = pts.max(axis=0)
+    bbox_min  = verts.min(axis=0)
+    bbox_max  = verts.max(axis=0)
     bbox_size = bbox_max - bbox_min
     bbox_size[bbox_size == 0] = 1.0
 
@@ -183,7 +182,7 @@ def _vertex_clustering(
     n_side = max(2, int(np.cbrt(target_verts)))
 
     cell_idx = np.floor(
-        (pts - bbox_min) / bbox_size * (n_side - 1)
+        (verts - bbox_min) / bbox_size * (n_side - 1)
     ).astype(np.int32)
     cell_id = (
         cell_idx[:, 0] * n_side * n_side
@@ -195,14 +194,14 @@ def _vertex_clustering(
     unique_ids, inverse = np.unique(cell_id, return_inverse=True)
     new_verts = np.zeros((len(unique_ids), 3), dtype=np.float64)
     counts    = np.zeros(len(unique_ids), dtype=np.int32)
-    np.add.at(new_verts, inverse, pts)
+    np.add.at(new_verts, inverse, verts)
     np.add.at(counts,    inverse, 1)
     new_verts /= counts[:, None]
 
     # Remapovanje face indeksa
-    new_faces = inverse[fcs]
+    new_faces = inverse[faces].astype(np.int32)
 
-    # Uklanjanje degenerisanih trouglova (sve 3 tačke iste ćelije)
+    # Uklanjanje degenerisanih trouglova (dve/tri tačke ista ćelija)
     mask = (
         (new_faces[:, 0] != new_faces[:, 1])
         & (new_faces[:, 1] != new_faces[:, 2])
@@ -210,4 +209,4 @@ def _vertex_clustering(
     )
     new_faces = new_faces[mask]
 
-    return new_verts.tolist(), new_faces.tolist()
+    return new_verts, new_faces

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QSlider, QRadioButton, QButtonGroup,
     QFileDialog, QProgressBar, QStatusBar,
     QFrame, QSizePolicy,
@@ -25,7 +25,26 @@ from core.max_finder import find_max_exe
 from ui.viewer_widget import MeshViewer
 
 
-# ── Pozadinski thread za decimaciju ──────────────────────────────────────────
+# ── Pozadinski threadovi ─────────────────────────────────────────────────────
+
+class LoadWorker(QThread):
+    """Učitava ASCII mesh fajl u pozadini da UI ne bi zamrzao."""
+    finished = pyqtSignal(float)   # elapsed sekunde
+    error    = pyqtSignal(str)
+
+    def __init__(self, model, path):
+        super().__init__()
+        self.model = model
+        self.path  = path
+
+    def run(self):
+        t0 = time.perf_counter()
+        try:
+            self.model.load(self.path)
+            self.finished.emit(time.perf_counter() - t0)
+        except Exception as e:
+            self.error.emit(str(e))
+
 
 class DecimateWorker(QThread):
     finished = pyqtSignal(float)
@@ -159,10 +178,11 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.model     = MeshModel()
-        self.worker    = None
-        self.max_exe   = find_max_exe()
-        self.settings  = QSettings("MeshConverter", "App")
+        self.model       = MeshModel()
+        self.worker      = None   # DecimateWorker
+        self.load_worker = None   # LoadWorker
+        self.max_exe     = find_max_exe()
+        self.settings    = QSettings("MeshConverter", "App")
         self._fullscreen_viewer = False
 
         self.setWindowTitle("3DS Max → ASCII Konvertor")
@@ -253,8 +273,8 @@ class MainWindow(QMainWindow):
         self.file_card.setVisible(False)
         fcv = QHBoxLayout(self.file_card)
         fcv.setContentsMargins(12, 10, 12, 10); fcv.setSpacing(10)
-        ficon = QLabel("📄")
-        ficon.setStyleSheet("font-size:20px; background:transparent;")
+        self.file_icon = QLabel("📄")
+        self.file_icon.setStyleSheet("font-size:20px; background:transparent;")
         finfo = QVBoxLayout(); finfo.setSpacing(1)
         self.lbl_fname = QLabel("—")
         self.lbl_fname.setStyleSheet(
@@ -263,7 +283,7 @@ class MainWindow(QMainWindow):
         self.lbl_fsize.setStyleSheet(
             "font-size:11px; color:#666; background:transparent;")
         finfo.addWidget(self.lbl_fname); finfo.addWidget(self.lbl_fsize)
-        fcv.addWidget(ficon); fcv.addLayout(finfo); fcv.addStretch()
+        fcv.addWidget(self.file_icon); fcv.addLayout(finfo); fcv.addStretch()
         lv.addWidget(self.file_card)
         return w
 
@@ -338,7 +358,10 @@ class MainWindow(QMainWindow):
         lv.addWidget(self.btn_convert)
 
         self.progress = QProgressBar()
-        self.progress.setRange(0, 0); self.progress.setFixedHeight(4)
+        self.progress.setObjectName("workProgress")
+        self.progress.setRange(0, 0)
+        self.progress.setFixedHeight(6)
+        self.progress.setTextVisible(False)
         self.progress.setVisible(False)
         lv.addWidget(self.progress)
 
@@ -421,12 +444,12 @@ class MainWindow(QMainWindow):
     def _refresh(self):
         loaded    = self.model.is_loaded()
         decimated = self.model.has_decimated()
-        busy      = self.worker is not None
+        busy      = self.worker is not None or self.load_worker is not None
 
         self.btn_convert.setEnabled(loaded and not busy)
-        self.btn_ascii.setEnabled(loaded)
-        self.btn_obj.setEnabled(loaded)
-        self.slider.setEnabled(loaded)
+        self.btn_ascii.setEnabled(loaded and not busy)
+        self.btn_obj.setEnabled(loaded and not busy)
+        self.slider.setEnabled(loaded and not busy)
 
         s = self.model.stats_dict()
 
@@ -469,27 +492,64 @@ class MainWindow(QMainWindow):
         self._load_file(path)
 
     def _load_file(self, path: str):
-        try:
-            self.model.load(path)
-            self.settings.setValue("last_dir", str(Path(path).parent))
-            name = Path(path).name
-            size_kb = Path(path).stat().st_size // 1024
-            self.lbl_fname.setText(name)
-            self.lbl_fsize.setText(f"{size_kb} KB · ASCII Mesh")
-            self.file_card.setVisible(True)
-            self.viewer.show_original(self.model.original_verts,
-                                      self.model.original_faces)
-            self.viewer.clear_after()
-            self._refresh()
-            o = self.model.original_stats()
-            self.status.showMessage(
-                f"Učitano: {name}  —  {o.verts:,} tačaka, {o.faces:,} trouglova")
-        except Exception as e:
-            self.status.showMessage(f"Greška pri učitavanju: {e}")
+        if self.load_worker or self.worker:
+            self.status.showMessage("Sačekajte da se prethodni posao završi…")
+            return
+
+        # Odmah pokažemo koji fajl se učitava — bolji feedback
+        name = Path(path).name
+        size_kb = Path(path).stat().st_size // 1024
+        size_str = f"{size_kb / 1024:.1f} MB" if size_kb >= 1024 else f"{size_kb} KB"
+        self.file_icon.setText("⏳")
+        self.lbl_fname.setText(name)
+        self.lbl_fsize.setText(f"{size_str} · čitanje…")
+        self.file_card.setVisible(True)
+        self.progress.setVisible(True)
+        self.status.showMessage(f"Čitanje: {name} ({size_str})…")
+        self._pending_path = path
+
+        self.load_worker = LoadWorker(self.model, path)
+        self.load_worker.finished.connect(self._on_load_done)
+        self.load_worker.error.connect(self._on_load_error)
+        self.load_worker.start()
+        self._refresh()
+
+    def _on_load_done(self, elapsed: float):
+        self.load_worker = None
+        self.progress.setVisible(False)
+        path = getattr(self, "_pending_path", "")
+        self.settings.setValue("last_dir", str(Path(path).parent))
+        name = Path(path).name
+        size_kb = Path(path).stat().st_size // 1024
+        size_str = f"{size_kb / 1024:.1f} MB" if size_kb >= 1024 else f"{size_kb} KB"
+        self.file_icon.setText("📄")
+        self.lbl_fsize.setText(f"{size_str} · ASCII Mesh")
+
+        self.status.showMessage("Priprema 3D prikaza…")
+        # Osvežimo Qt odmah da se poruka vidi pre nego što render zauzme UI
+        QApplication.processEvents()
+
+        self.viewer.show_original(self.model.original_verts,
+                                  self.model.original_faces)
+        self.viewer.clear_after()
+        self._refresh()
+        o = self.model.original_stats()
+        self.status.showMessage(
+            f"Učitano za {elapsed:.2f}s — {name} "
+            f"({o.verts:,} tačaka, {o.faces:,} trouglova)"
+        )
+
+    def _on_load_error(self, msg: str):
+        self.load_worker = None
+        self.progress.setVisible(False)
+        self.file_card.setVisible(False)
+        self.file_icon.setText("📄")
+        self._refresh()
+        self.status.showMessage(f"Greška pri učitavanju: {msg}")
 
     # ── Decimacija ───────────────────────────────────────────────────
     def _on_decimate(self):
-        if not self.model.is_loaded() or self.worker:
+        if not self.model.is_loaded() or self.worker or self.load_worker:
             return
         pct    = self.slider.value()
         ratio  = 1.0 - pct / 100.0
@@ -550,15 +610,15 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
+            import numpy as np
             use_dec = self.model.has_decimated()
             verts = self.model.decimated_verts if use_dec else self.model.original_verts
             faces = self.model.decimated_faces if use_dec else self.model.original_faces
             with open(path, "w") as f:
                 f.write("# Exported by 3DS Max ASCII Konvertor\n")
-                for v in verts:
-                    f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
-                for t in faces:
-                    f.write(f"f {t[0]+1} {t[1]+1} {t[2]+1}\n")
+                np.savetxt(f, verts, fmt="v %.6f %.6f %.6f")
+                # OBJ trouglovi su 1-based indeksi
+                np.savetxt(f, faces + 1, fmt="f %d %d %d")
             kind = "decimirani" if use_dec else "originalni"
             self.status.showMessage(f"Sačuvan {kind} mesh kao OBJ: {Path(path).name}")
         except Exception as e:

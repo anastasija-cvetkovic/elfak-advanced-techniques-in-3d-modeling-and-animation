@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 from core.converter import load_mesh, save_mesh
 from core.decimator import decimate
 
@@ -37,20 +39,21 @@ class MeshModel:
     """
 
     def __init__(self) -> None:
-        self.source_path:     Optional[str]  = None
-        self.original_verts:  Optional[list] = None
-        self.original_faces:  Optional[list] = None
-        self.decimated_verts: Optional[list] = None
-        self.decimated_faces: Optional[list] = None
-        self.last_ratio:      float          = 1.0
-        self.last_method:     str            = "auto"
+        self.source_path:     Optional[str]        = None
+        self.original_verts:  Optional[np.ndarray] = None
+        self.original_faces:  Optional[np.ndarray] = None
+        self.decimated_verts: Optional[np.ndarray] = None
+        self.decimated_faces: Optional[np.ndarray] = None
+        self.last_ratio:      float                = 1.0
+        self.last_method:     str                  = "auto"
+        self._shape_error:    Optional[float]      = None
 
     # ── Učitavanje ────────────────────────────────────────────────────────────
 
     def load(self, path: str) -> None:
         """
         Učitava ASCII mesh fajl.
-        Resetuje prethodni decimirani rezultat.
+        Resetuje prethodni decimirani rezultat i keš greške.
         """
         verts, faces = load_mesh(path)
         self.source_path     = path
@@ -58,6 +61,7 @@ class MeshModel:
         self.original_faces  = faces
         self.decimated_verts = None
         self.decimated_faces = None
+        self._shape_error    = None
 
     def is_loaded(self) -> bool:
         return self.original_verts is not None
@@ -68,6 +72,8 @@ class MeshModel:
         """
         Pokreće decimaciju nad originalnim mesh-om.
         Čuva rezultat u decimated_verts / decimated_faces.
+        Na kraju keš-ira Hausdorff grešku (i sav taj račun ostaje u istom
+        worker thread-u — main thread ostaje slobodan).
         Može se pozivati više puta sa različitim parametrima.
         """
         if not self.is_loaded():
@@ -75,6 +81,7 @@ class MeshModel:
 
         self.last_ratio  = ratio
         self.last_method = method
+        self._shape_error = None  # invalidate keš pre novog računa
 
         v, f = decimate(
             self.original_verts,
@@ -84,6 +91,10 @@ class MeshModel:
         )
         self.decimated_verts = v
         self.decimated_faces = f
+
+        # Precomputamo grešku u istom thread-u kao decimacija — dok worker
+        # radi svoje, UI je slobodan. shape_error_pct() posle samo čita keš.
+        self._shape_error = self._compute_shape_error()
 
     def has_decimated(self) -> bool:
         return self.decimated_verts is not None
@@ -129,14 +140,21 @@ class MeshModel:
 
     def shape_error_pct(self) -> float | None:
         """
+        Vraća keširanu Hausdorff grešku (%), izračunatu u run_decimate.
+        Trivijalan getter — bezbedno se poziva iz UI thread-a.
+        """
+        return self._shape_error
+
+    def _compute_shape_error(self) -> float | None:
+        """
         Hausdorff distance (orig → dec) normalizovan dijagonalom bounding box-a, u %.
+        Težak račun — zove se iz worker thread-a, ne iz UI-ja.
         """
         if not self.has_decimated():
             return None
         try:
-            import numpy as np
-            orig = np.array(self.original_verts,  dtype=np.float64)
-            dec  = np.array(self.decimated_verts, dtype=np.float64)
+            orig = self.original_verts
+            dec  = self.decimated_verts
 
             diag = float(np.linalg.norm(orig.max(axis=0) - orig.min(axis=0)))
             if diag == 0:
@@ -147,7 +165,8 @@ class MeshModel:
 
             try:
                 from scipy.spatial import cKDTree
-                dists, _ = cKDTree(dec).query(sample, k=1)
+                # workers=-1 → cKDTree query koristi sva CPU jezgra paralelno
+                dists, _ = cKDTree(dec).query(sample, k=1, workers=-1)
             except ImportError:
                 dists = np.sqrt(((sample[:, None] - dec[None]) ** 2).sum(axis=2)).min(axis=1)
 
