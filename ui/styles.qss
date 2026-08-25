@@ -1,0 +1,218 @@
+QMainWindow, QWidget {
+    background: #1a1c23;
+    color: #e0e0e0;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+
+QToolBar {
+    background: #252830;
+    border-bottom: 1px solid #2e3140;
+    padding: 6px 12px;
+    spacing: 6px;
+}
+
+QToolBar QToolButton {
+    background: transparent;
+    color: #aaa;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 6px;
+}
+
+QToolBar QToolButton:hover {
+    background: #2e3140;
+    color: #fff;
+}
+
+/* Naslovna traka */
+QLabel#appTitle {
+    font-size: 16px;
+    font-weight: 500;
+    color: #ffffff;
+    background: transparent;
+}
+
+QLabel#appSubtitle {
+    font-size: 12px;
+    color: #888;
+    background: transparent;
+}
+
+/* Upload zona */
+QFrame#uploadZone {
+    border: 1.5px dashed #3a3e52;
+    border-radius: 10px;
+    background: #1e2130;
+}
+
+QFrame#uploadZone:hover {
+    border-color: #4a5080;
+    background: #22263a;
+}
+
+/* Fajl info kartica */
+QFrame#fileCard {
+    background: #252830;
+    border-radius: 8px;
+    border: none;
+}
+
+/* Sekcije */
+QLabel#sectionLabel {
+    font-size: 10px;
+    font-weight: 500;
+    color: #555;
+    letter-spacing: 1.5px;
+    background: transparent;
+}
+
+/* Slider */
+QSlider::groove:horizontal {
+    background: #2e3140;
+    height: 4px;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: #ffffff;
+    width: 18px;
+    height: 18px;
+    margin: -7px 0;
+    border-radius: 9px;
+    border: 2px solid #3a3e52;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #e0e0e0;
+}
+
+QSlider::sub-page:horizontal {
+    background: #4a5a8a;
+    border-radius: 2px;
+}
+
+/* Radio */
+QRadioButton {
+    spacing: 8px;
+    color: #ccc;
+    font-size: 13px;
+    font-weight: 500;
+    background: transparent;
+}
+
+QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    border: 2px solid #3a3e52;
+    background: transparent;
+}
+
+QRadioButton::indicator:checked {
+    background: #4a7adf;
+    border-color: #4a7adf;
+}
+
+/* Dugmad */
+QPushButton {
+    background: #252830;
+    color: #ccc;
+    border: 1px solid #3a3e52;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+}
+
+QPushButton:hover {
+    background: #2e3140;
+    color: #fff;
+    border-color: #4a5080;
+}
+
+QPushButton:pressed {
+    background: #1e2130;
+}
+
+QPushButton:disabled {
+    color: #444;
+    border-color: #2e3140;
+    background: #1e2130;
+}
+
+QPushButton#btnConvert {
+    background: #252830;
+    color: #e0e0e0;
+    border: 1px solid #3a3e52;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 10px;
+}
+
+QPushButton#btnConvert:hover {
+    background: #2e3140;
+}
+
+QPushButton#btnConvert:disabled {
+    color: #444;
+}
+
+QPushButton#btnAscii {
+    background: #252830;
+    color: #ccc;
+    border: 1px solid #3a3e52;
+    border-radius: 8px;
+    font-size: 13px;
+    padding: 8px;
+}
+
+QPushButton#btnObj {
+    background: #252830;
+    color: #ccc;
+    border: 1px solid #3a3e52;
+    border-radius: 8px;
+    font-size: 13px;
+    padding: 8px;
+}
+
+/* Progress */
+QProgressBar {
+    background: #2e3140;
+    border: none;
+    border-radius: 2px;
+    height: 4px;
+    color: transparent;
+}
+
+QProgressBar::chunk {
+    background: #4a7adf;
+    border-radius: 2px;
+}
+
+/* Status bar */
+QStatusBar {
+    background: #252830;
+    color: #666;
+    border-top: 1px solid #2e3140;
+    font-size: 12px;
+    padding: 3px 10px;
+}
+
+/* Separator */
+QFrame[frameShape="4"] {
+    color: #2e3140;
+    background: #2e3140;
+    border: none;
+    max-height: 1px;
+}
+
+/* Scrollbar */
+QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+}
+QScrollBar::handle:vertical {
+    background: #3a3e52;
+    border-radius: 3px;
+}

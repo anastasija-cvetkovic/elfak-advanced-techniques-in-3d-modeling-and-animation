@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Generisani mesh primeri (regenerisi sa: python generate_examples.py)
+DRAGON.txt
+ARMADILLO.txt
+BUNNY.txt
+TORUS_DEBLJI.txt
+MOBIUS.txt
+FIGURA_8.txt
+ELIPSA.txt
+SFERA.txt
+CILINDAR.txt
+KONUS.txt
+KUPA_ZAOBLJENA.txt
+BOX_SUBDIVIDED.txt
+TEAPOT.txt
+COW.txt
+
+# Build / distribucija
+dist/
+build/
+*.spec
+*.exe
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
