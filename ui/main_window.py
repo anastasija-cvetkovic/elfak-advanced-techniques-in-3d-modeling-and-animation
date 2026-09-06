@@ -14,11 +14,11 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QSlider, QRadioButton, QButtonGroup,
-    QFileDialog, QProgressBar, QStatusBar,
+    QFileDialog, QStatusBar,
     QFrame, QSizePolicy,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings, QMimeData, QUrl
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QSettings, QMimeData, QUrl
+from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPainter, QColor, QLinearGradient
 
 from core.mesh_model import MeshModel
 from core.max_finder import find_max_exe
@@ -46,6 +46,30 @@ class LoadWorker(QThread):
             self.error.emit(str(e))
 
 
+class MaxConvertWorker(QThread):
+    """Konvertuje .max → ASCII u pozadini koristeći 3ds Max headless."""
+    finished = pyqtSignal(str)   # putanja do generisanog .txt
+    error    = pyqtSignal(str)
+
+    def __init__(self, max_exe, ms_script, input_max, output_txt):
+        super().__init__()
+        self.max_exe    = max_exe
+        self.ms_script  = ms_script
+        self.input_max  = input_max
+        self.output_txt = output_txt
+
+    def run(self):
+        try:
+            from core.converter import export_from_max_headless
+            export_from_max_headless(
+                self.max_exe, self.ms_script,
+                self.input_max, self.output_txt,
+            )
+            self.finished.emit(self.output_txt)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class DecimateWorker(QThread):
     finished = pyqtSignal(float)
     error    = pyqtSignal(str)
@@ -61,6 +85,57 @@ class DecimateWorker(QThread):
             self.finished.emit(time.perf_counter() - t0)
         except Exception as e:
             self.error.emit(str(e))
+
+
+# ── Sweep progress bar ───────────────────────────────────────────────────────
+
+class SweepBar(QWidget):
+    """Indeterminate progress bar — tračak svetlosti koji klizi s leva na desno."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(6)
+        self._pos = -0.4
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self.setVisible(False)
+
+    def start(self):
+        self._pos = -0.4
+        self.setVisible(True)
+        self._timer.start(16)
+
+    def stop(self):
+        self._timer.stop()
+        self.setVisible(False)
+
+    def _tick(self):
+        self._pos += 0.014
+        if self._pos > 1.4:
+            self._pos = -0.4
+        self.update()
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor("#2e3140"))
+        p.drawRoundedRect(0, 0, w, h, 3, 3)
+
+        cx = self._pos * w
+        sw = w * 0.45
+        grad = QLinearGradient(cx - sw, 0, cx + sw, 0)
+        grad.setColorAt(0.0,  QColor(0, 0, 0, 0))
+        grad.setColorAt(0.38, QColor("#4a7adf"))
+        grad.setColorAt(0.5,  QColor("#7ab0ff"))
+        grad.setColorAt(0.62, QColor("#4a7adf"))
+        grad.setColorAt(1.0,  QColor(0, 0, 0, 0))
+
+        p.setBrush(grad)
+        p.drawRoundedRect(0, 0, w, h, 3, 3)
+        p.end()
 
 
 # ── Upload zona sa drag & drop podrškom ──────────────────────────────────────
@@ -181,6 +256,7 @@ class MainWindow(QMainWindow):
         self.model       = MeshModel()
         self.worker      = None   # DecimateWorker
         self.load_worker = None   # LoadWorker
+        self.max_worker  = None   # MaxConvertWorker
         self.max_exe     = find_max_exe()
         self.settings    = QSettings("MeshConverter", "App")
         self._fullscreen_viewer = False
@@ -220,26 +296,6 @@ class MainWindow(QMainWindow):
         lv.setContentsMargins(0, 0, 0, 0)
         lv.setSpacing(0)
 
-        # Naslov
-        header = QWidget()
-        header.setObjectName("leftHeader")
-        header.setStyleSheet(
-            "QWidget#leftHeader { background:#252830; border-bottom:1px solid #2e3140; }"
-        )
-        hh = QHBoxLayout(header)
-        hh.setContentsMargins(16, 14, 16, 14); hh.setSpacing(10)
-        icon = QLabel("⬡")
-        icon.setStyleSheet("font-size:20px; color:#4a7adf; background:transparent;")
-        titles = QVBoxLayout()
-        t1 = QLabel("3DS Max → ASCII konvertor")
-        t1.setObjectName("appTitle")
-        t2 = QLabel("Učitajte .max fajl, podesite optimizaciju i eksportujte")
-        t2.setObjectName("appSubtitle")
-        t2.setWordWrap(True)
-        titles.addWidget(t1); titles.addWidget(t2)
-        hh.addWidget(icon); hh.addLayout(titles)
-        lv.addWidget(header)
-
         # Sadržaj
         scroll = QWidget()
         scroll.setStyleSheet("background:transparent;")
@@ -267,6 +323,13 @@ class MainWindow(QMainWindow):
         self.upload_zone.file_dropped.connect(self._on_drop_or_click)
         lv.addWidget(self.upload_zone)
 
+        self.btn_load_max = QPushButton("⬆  Učitaj .max fajl")
+        self.btn_load_max.setObjectName("btnLoadMax")
+        self.btn_load_max.setFixedHeight(32)
+        self.btn_load_max.setVisible(self.max_exe is not None)
+        self.btn_load_max.clicked.connect(self._on_load_max)
+        lv.addWidget(self.btn_load_max)
+
         # Kartica učitanog fajla
         self.file_card = QFrame()
         self.file_card.setObjectName("fileCard")
@@ -283,7 +346,17 @@ class MainWindow(QMainWindow):
         self.lbl_fsize.setStyleSheet(
             "font-size:11px; color:#666; background:transparent;")
         finfo.addWidget(self.lbl_fname); finfo.addWidget(self.lbl_fsize)
+        btn_change = QPushButton("Zameni")
+        btn_change.setFixedHeight(26)
+        btn_change.setToolTip("Učitaj drugi fajl")
+        btn_change.setStyleSheet(
+            "QPushButton { background:#2e3140; border:none; border-radius:5px;"
+            " color:#aaa; font-size:11px; padding: 0 8px; }"
+            "QPushButton:hover { background:#3a3f55; color:#fff; }"
+        )
+        btn_change.clicked.connect(self._on_change_file)
         fcv.addWidget(self.file_icon); fcv.addLayout(finfo); fcv.addStretch()
+        fcv.addWidget(btn_change)
         lv.addWidget(self.file_card)
         return w
 
@@ -357,13 +430,12 @@ class MainWindow(QMainWindow):
         self.btn_convert.clicked.connect(self._on_decimate)
         lv.addWidget(self.btn_convert)
 
-        self.progress = QProgressBar()
-        self.progress.setObjectName("workProgress")
-        self.progress.setRange(0, 0)
-        self.progress.setFixedHeight(6)
-        self.progress.setTextVisible(False)
-        self.progress.setVisible(False)
-        lv.addWidget(self.progress)
+        prog_wrap = QWidget(); prog_wrap.setFixedHeight(18)
+        prog_wl = QVBoxLayout(prog_wrap)
+        prog_wl.setContentsMargins(0, 6, 0, 6)
+        self.progress = SweepBar()
+        prog_wl.addWidget(self.progress)
+        lv.addWidget(prog_wrap)
 
         row = QHBoxLayout(); row.setSpacing(8)
         self.btn_ascii = QPushButton("⬇ ASCII .txt")
@@ -396,7 +468,7 @@ class MainWindow(QMainWindow):
         lbl3d.setStyleSheet("font-size:13px; color:#666; background:transparent;")
         vth.addWidget(lbl3d); vth.addStretch()
 
-        self.btn_orbit  = QPushButton("⊕  Orbita")
+        self.btn_orbit  = QPushButton("⊕  Reset kamere")
         self.btn_orbit.setFixedHeight(30)
         self.btn_orbit.clicked.connect(self._on_reset_camera)
 
@@ -481,6 +553,12 @@ class MainWindow(QMainWindow):
         self.lbl_hint.setText(f"Zadržava se ~{100 - v}% trouglova")
 
     # ── Učitavanje fajla ─────────────────────────────────────────────
+    def _on_change_file(self):
+        """Zamena fajla — prikaži upload zonu, sakrij karticu."""
+        self.file_card.setVisible(False)
+        self.upload_zone.setVisible(True)
+        self.btn_load_max.setVisible(self.max_exe is not None)
+
     def _on_drop_or_click(self, path: str):
         if not path:
             last = self.settings.value("last_dir", "")
@@ -503,8 +581,10 @@ class MainWindow(QMainWindow):
         self.file_icon.setText("⏳")
         self.lbl_fname.setText(name)
         self.lbl_fsize.setText(f"{size_str} · čitanje…")
+        self.upload_zone.setVisible(False)
+        self.btn_load_max.setVisible(False)
         self.file_card.setVisible(True)
-        self.progress.setVisible(True)
+        self.progress.start()
         self.status.showMessage(f"Čitanje: {name} ({size_str})…")
         self._pending_path = path
 
@@ -516,7 +596,7 @@ class MainWindow(QMainWindow):
 
     def _on_load_done(self, elapsed: float):
         self.load_worker = None
-        self.progress.setVisible(False)
+        self.progress.stop()
         path = getattr(self, "_pending_path", "")
         self.settings.setValue("last_dir", str(Path(path).parent))
         name = Path(path).name
@@ -541,11 +621,51 @@ class MainWindow(QMainWindow):
 
     def _on_load_error(self, msg: str):
         self.load_worker = None
-        self.progress.setVisible(False)
+        self.progress.stop()
         self.file_card.setVisible(False)
+        self.upload_zone.setVisible(True)
+        self.btn_load_max.setVisible(self.max_exe is not None)
         self.file_icon.setText("📄")
         self._refresh()
         self.status.showMessage(f"Greška pri učitavanju: {msg}")
+
+    # ── .max konverzija ──────────────────────────────────────────────
+    def _on_load_max(self):
+        if self.max_worker or self.load_worker or self.worker:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Izaberi .max fajl", "", "3ds Max fajlovi (*.max)"
+        )
+        if not path:
+            return
+
+        from pathlib import Path as _Path
+        out_txt = str(_Path(path).with_suffix(".txt"))
+        ms_script = str(_Path(__file__).parent.parent / "core" / "export_ascii.ms")
+
+        self.progress.start()
+        self.btn_load_max.setEnabled(False)
+        self.status.showMessage(f"Konverzija .max → ASCII: {_Path(path).name}…")
+
+        self.max_worker = MaxConvertWorker(self.max_exe, ms_script, path, out_txt)
+        self.max_worker.finished.connect(self._on_max_done)
+        self.max_worker.error.connect(self._on_max_error)
+        self.max_worker.start()
+
+    def _on_max_done(self, txt_path: str):
+        self.max_worker = None
+        self.progress.stop()
+        self.btn_load_max.setEnabled(True)
+        self.status.showMessage("Konverzija završena — učitavam mesh…")
+        self._load_file(txt_path)
+
+    def _on_max_error(self, msg: str):
+        self.max_worker = None
+        self.progress.stop()
+        self.upload_zone.setVisible(True)
+        self.btn_load_max.setVisible(True)
+        self.btn_load_max.setEnabled(True)
+        self.status.showMessage(f"Greška pri konverziji: {msg}")
 
     # ── Decimacija ───────────────────────────────────────────────────
     def _on_decimate(self):
@@ -554,7 +674,7 @@ class MainWindow(QMainWindow):
         pct    = self.slider.value()
         ratio  = 1.0 - pct / 100.0
         method = "pyfqmr" if self.rb_qec.isChecked() else "cluster"
-        self.progress.setVisible(True)
+        self.progress.start()
         self.btn_convert.setEnabled(False)
         self.status.showMessage(f"Konverzija u toku ({pct}% smanjenje, {method})...")
         self.worker = DecimateWorker(self.model, ratio, method)
@@ -564,7 +684,7 @@ class MainWindow(QMainWindow):
 
     def _on_done(self, elapsed: float):
         self.worker = None
-        self.progress.setVisible(False)
+        self.progress.stop()
         self.viewer.show_decimated(self.model.decimated_verts,
                                    self.model.decimated_faces)
         self._refresh()
@@ -577,7 +697,7 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, msg: str):
         self.worker = None
-        self.progress.setVisible(False)
+        self.progress.stop()
         self._refresh()
         self.status.showMessage(f"Greška: {msg}")
 

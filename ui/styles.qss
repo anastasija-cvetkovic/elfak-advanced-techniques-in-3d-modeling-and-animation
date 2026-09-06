@@ -145,6 +145,20 @@ QPushButton:disabled {
     background: #1e2130;
 }
 
+QPushButton#btnLoadMax {
+    background: #1e2a1e;
+    color: #7ec87e;
+    border: 1px solid #2e4a2e;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+QPushButton#btnLoadMax:hover {
+    background: #253525;
+    color: #a0e0a0;
+}
+
 QPushButton#btnConvert {
     background: #252830;
     color: #e0e0e0;
@@ -179,21 +193,6 @@ QPushButton#btnObj {
     border-radius: 8px;
     font-size: 13px;
     padding: 8px;
-}
-
-/* Progress */
-QProgressBar#workProgress {
-    background: #2e3140;
-    border: none;
-    border-radius: 3px;
-    min-height: 6px;
-    max-height: 6px;
-    color: transparent;
-}
-
-QProgressBar#workProgress::chunk {
-    background: #4a7adf;
-    border-radius: 3px;
 }
 
 /* Status bar */
