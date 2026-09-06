@@ -2,26 +2,30 @@
 ui/main_window.py
 Layout identičan screenshotu:
   - Tamna tema
-  - Levo: naslov app, upload zona (drag&drop), fajl kartica, slider, metoda, prikaz, dugmad
+  - Levo: zona za fajl (drag&drop, tri stanja), slider, metoda, prikaz, dugmad
   - Desno: 3D prikaz sa toolbar-om (Orbita / Ceo ekran)
   - Desno dole: statistike (Originalne tačke, Nakon optimizacije, Trouglovi, Greška)
 """
 
 from __future__ import annotations
+import os
 import time
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QSlider, QRadioButton, QButtonGroup,
-    QFileDialog, QStatusBar,
+    QFileDialog, QStatusBar, QStackedLayout, QScrollArea,
     QFrame, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QSettings, QMimeData, QUrl
-from PyQt6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPainter, QColor, QLinearGradient
+from PyQt6.QtGui import (
+    QAction, QDragEnterEvent, QDropEvent, QPainter, QColor, QLinearGradient,
+    QFontMetrics,
+)
 
 from core.mesh_model import MeshModel
-from core.max_finder import find_max_exe
+from core.max_finder import find_max_exe, save_max_exe, max_version_from_path
 from ui.viewer_widget import MeshViewer
 
 
@@ -60,8 +64,11 @@ class MaxConvertWorker(QThread):
 
     def run(self):
         try:
-            from core.converter import export_from_max_headless
-            export_from_max_headless(
+            # Vidljivi Max, ne headless: education licence ne dozvoljavaju
+            # batch režim (3dsmaxbatch.exe izlazi sa -12 pre nego što uopšte
+            # pročita skriptu). Interaktivni Max na istoj licenci radi.
+            from core.converter import export_from_max_gui
+            export_from_max_gui(
                 self.max_exe, self.ms_script,
                 self.input_max, self.output_txt,
             )
@@ -138,42 +145,212 @@ class SweepBar(QWidget):
         p.end()
 
 
-# ── Upload zona sa drag & drop podrškom ──────────────────────────────────────
+# ── Zona za fajl: jedna, fiksne visine, tri stanja ───────────────────────────
 
-class UploadZone(QFrame):
-    file_dropped = pyqtSignal(str)
+class FileZone(QFrame):
+    """Prazno → učitavanje → učitano, sve u istom okviru fiksne visine.
+
+    Ranije su ovo bila dva odvojena widgeta (upload zona + fajl kartica) koja su
+    se međusobno sakrivala. Zona je 110px, kartica 46px — pa je pri svakom
+    učitavanju cela leva kolona skakala ~140px, i još jednom nazad pri zameni
+    fajla. Sada se menja samo sadržaj okvira; ništa ispod se ne pomera.
+
+    Ispod separatora je stalno podnožje sa .max dugmetom — i to je "učitaj
+    fajl" akcija, pa nema razloga da stoji izvan okvira. Podnožje je isto u
+    sva tri stanja; menja se samo deo iznad njega.
+
+    Drop i klik rade u svim stanjima osim tokom učitavanja — zamena fajla ne
+    traži nikakav prethodni korak.
+    """
+
+    file_dropped     = pyqtSignal(str)   # putanja prevučenog fajla
+    browse_requested = pyqtSignal()      # klik → otvori dijalog
+
+    STACK_H  = 104   # visina dela koji se menja; podnožje dolazi ispod
+    NAME_MAX = 200   # px pre elidiranja imena fajla
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("uploadZone")
-        self.setFixedHeight(110)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setObjectName("fileZone")
         self.setAcceptDrops(True)
+        self._state = ""
 
-        lv = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
+
+        host = QWidget()
+        host.setStyleSheet("background:transparent;")
+        host.setFixedHeight(self.STACK_H)
+        self._stack = QStackedLayout(host)
+        self._stack.setContentsMargins(12, 10, 12, 10)
+        self._stack.addWidget(self._build_empty())     # 0
+        self._stack.addWidget(self._build_loading())   # 1
+        self._stack.addWidget(self._build_loaded())    # 2
+        outer.addWidget(host)
+
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background:#2e3140; border:none;")
+        outer.addWidget(line)
+
+        outer.addWidget(self._build_max_footer())
+
+        self.set_empty()
+
+    def _build_max_footer(self):
+        """Stalno podnožje: .max dugme + verzija Maxa. Isto u svim stanjima."""
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        # Klik na praznu površinu podnožja ne sme da otvori .txt dijalog —
+        # bez ovoga bi propao do FileZone.mousePressEvent.
+        w.mousePressEvent = lambda e: None
+        w.setCursor(Qt.CursorShape.ArrowCursor)
+
+        lv = QVBoxLayout(w)
+        lv.setContentsMargins(11, 9, 11, 10); lv.setSpacing(6)
+
+        self.btn_max = QPushButton()
+        self.btn_max.setObjectName("btnLoadMax")
+        self.btn_max.setFixedHeight(28)
+        self.btn_max.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.lbl_max = QLabel()
+        self.lbl_max.setObjectName("maxPathHint")
+        self.lbl_max.setWordWrap(False)
+        self.lbl_max.setFixedHeight(14)
+        self.lbl_max.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        lv.addWidget(self.btn_max); lv.addWidget(self.lbl_max)
+        return w
+
+    # ── Stranice ─────────────────────────────────────────────────────
+    def _build_empty(self):
+        w = QWidget(); w.setStyleSheet("background:transparent;")
+        lv = QVBoxLayout(w)
+        lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(3)
         lv.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lv.setSpacing(4)
 
-        icon = QLabel("⬆")
-        icon.setStyleSheet("font-size:26px; color:#4a5080; background:transparent;")
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        for text, css in (
+            ("⬆", "font-size:24px; color:#4a5080;"),
+            ("Prevucite ASCII .txt fajl ovde", "font-size:13px; font-weight:500; color:#ccc;"),
+            ("ili kliknite za pregled", "font-size:11px; color:#5a5f70;"),
+        ):
+            l = QLabel(text)
+            l.setStyleSheet(css + " background:transparent;")
+            l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lv.addWidget(l)
+        return w
 
-        txt = QLabel("Prevucite ASCII .txt fajl ovde")
-        txt.setStyleSheet("font-size:14px; font-weight:500; color:#ccc; background:transparent;")
-        txt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    def _build_loading(self):
+        w = QWidget(); w.setStyleSheet("background:transparent;")
+        lv = QVBoxLayout(w)
+        lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(7)
+        lv.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        sub = QLabel("ili kliknite za pregled")
-        sub.setStyleSheet("font-size:12px; color:#555; background:transparent;")
-        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row = QHBoxLayout(); row.setSpacing(8)
+        self._load_icon = QLabel("⏳")
+        self._load_icon.setStyleSheet("font-size:16px; background:transparent;")
+        self._load_name = QLabel("—")
+        self._load_name.setStyleSheet(
+            "font-size:12px; font-weight:500; color:#fff; background:transparent;")
+        row.addStretch()
+        row.addWidget(self._load_icon); row.addWidget(self._load_name)
+        row.addStretch()
+        lv.addLayout(row)
 
-        lv.addWidget(icon); lv.addWidget(txt); lv.addWidget(sub)
+        self._load_meta = QLabel("—")
+        self._load_meta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._load_meta.setStyleSheet("font-size:11px; color:#8892a8; background:transparent;")
+        lv.addWidget(self._load_meta)
 
+        # Progres stoji uz fajl koji se učitava, a ne dole kod dugmeta za
+        # decimaciju — feedback treba da bude tamo gde se akcija desila.
+        self._load_bar = SweepBar()
+        lv.addWidget(self._load_bar)
+        return w
+
+    def _build_loaded(self):
+        w = QWidget(); w.setStyleSheet("background:transparent;")
+        lv = QVBoxLayout(w)
+        lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(8)
+        lv.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        row = QHBoxLayout(); row.setSpacing(8)
+        icon = QLabel("📄")
+        icon.setStyleSheet("font-size:17px; background:transparent;")
+        info = QVBoxLayout(); info.setSpacing(1)
+        self._done_name = QLabel("—")
+        self._done_name.setStyleSheet(
+            "font-size:12px; font-weight:500; color:#fff; background:transparent;")
+        self._done_meta = QLabel("—")
+        self._done_meta.setStyleSheet("font-size:11px; color:#8892a8; background:transparent;")
+        info.addWidget(self._done_name); info.addWidget(self._done_meta)
+        row.addStretch()
+        row.addWidget(icon); row.addLayout(info)
+        row.addStretch()
+        lv.addLayout(row)
+
+        # Vidljiva meta za klik. Cela zona i dalje reaguje na klik, ali bez
+        # dugmeta se to ne vidi — a sitan tekst se ne čita.
+        actions = QHBoxLayout(); actions.setSpacing(7)
+        btn = QPushButton("Izaberi drugi…")
+        btn.setObjectName("btnPickAnother")
+        btn.setFixedHeight(24)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(self.browse_requested.emit)
+        hint = QLabel("ili prevuci ovde")
+        hint.setStyleSheet("font-size:11px; color:#5a5f70; background:transparent;")
+        actions.addStretch()
+        actions.addWidget(btn); actions.addWidget(hint)
+        actions.addStretch()
+        lv.addLayout(actions)
+        return w
+
+    # ── Prelazi između stanja ────────────────────────────────────────
+    def _set_state(self, state: str):
+        self._state = state
+        self.setProperty("state", state)
+        self.setCursor(
+            Qt.CursorShape.ArrowCursor if state == "loading"
+            else Qt.CursorShape.PointingHandCursor
+        )
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def _elide(self, name: str) -> str:
+        return QFontMetrics(self.font()).elidedText(
+            name, Qt.TextElideMode.ElideMiddle, self.NAME_MAX)
+
+    def set_empty(self):
+        self._load_bar.stop()
+        self._stack.setCurrentIndex(0)
+        self._set_state("empty")
+
+    def set_loading(self, name: str, meta: str):
+        self._load_name.setText(self._elide(name))
+        self._load_name.setToolTip(name)
+        self._load_meta.setText(meta)
+        self._stack.setCurrentIndex(1)
+        self._set_state("loading")
+        self._load_bar.start()
+
+    def set_loaded(self, name: str, meta: str):
+        self._load_bar.stop()
+        self._done_name.setText(self._elide(name))
+        self._done_name.setToolTip(name)
+        self._done_meta.setText(meta)
+        self._stack.setCurrentIndex(2)
+        self._set_state("loaded")
+
+    # ── Drag & drop / klik ───────────────────────────────────────────
     def _set_drag_active(self, active: bool):
         self.setProperty("dragActive", active)
         self.style().unpolish(self)
         self.style().polish(self)
 
     def dragEnterEvent(self, e: QDragEnterEvent):
+        if self._state == "loading":
+            return
         if e.mimeData().hasUrls() and any(
             u.toLocalFile().lower().endswith('.txt') for u in e.mimeData().urls()
         ):
@@ -193,7 +370,8 @@ class UploadZone(QFrame):
         e.acceptProposedAction()
 
     def mousePressEvent(self, e):
-        self.file_dropped.emit("")
+        if self._state != "loading":
+            self.browse_requested.emit()
 
 
 # ── Pomoćni widgeti ───────────────────────────────────────────────────────────
@@ -297,19 +475,34 @@ class MainWindow(QMainWindow):
         lv.setSpacing(0)
 
         # Sadržaj
-        scroll = QWidget()
-        scroll.setStyleSheet("background:transparent;")
-        sv = QVBoxLayout(scroll)
+        content = QWidget()
+        content.setStyleSheet("background:transparent;")
+        sv = QVBoxLayout(content)
         sv.setContentsMargins(16, 16, 16, 16)
         sv.setSpacing(16)
 
+        self._opt_section = self._section_optimization()
+
         sv.addWidget(self._section_upload())
         sv.addWidget(_sep())
-        sv.addWidget(self._section_optimization())
+        sv.addWidget(self._opt_section)
         sv.addWidget(_sep())
         sv.addWidget(self._section_prikaz())
         sv.addStretch()
         sv.addWidget(self._section_buttons())
+
+        # Sekcijama treba ~640px, a panel ih na 700px prozoru dobije manje —
+        # bez scroll area Qt ih stisne ispod minimuma i widgeti se preklope
+        # (dugme za .max je ulazilo u zonu za fajl). Sa scroll-om svaka sekcija
+        # dobija punu visinu, a višak se skroluje.
+        scroll = QScrollArea()
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("background:transparent;")
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.viewport().setStyleSheet("background:transparent;")
 
         lv.addWidget(scroll, stretch=1)
         return w
@@ -319,45 +512,23 @@ class MainWindow(QMainWindow):
         lv = QVBoxLayout(w); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(10)
         lv.addWidget(_section_label("UČITAVANJE FAJLA"))
 
-        self.upload_zone = UploadZone()
-        self.upload_zone.file_dropped.connect(self._on_drop_or_click)
-        lv.addWidget(self.upload_zone)
+        self.file_zone = FileZone()
+        self.file_zone.file_dropped.connect(self._load_file)
+        self.file_zone.browse_requested.connect(self._on_browse)
+        lv.addWidget(self.file_zone)
 
-        self.btn_load_max = QPushButton("⬆  Učitaj .max fajl")
-        self.btn_load_max.setObjectName("btnLoadMax")
-        self.btn_load_max.setFixedHeight(32)
-        self.btn_load_max.setVisible(self.max_exe is not None)
+        # .max kontrole žive u podnožju zone; ovde ih samo ožičimo. Dugme je
+        # UVEK vidljivo — ranije se sakrivalo kad Max nije pronađen, pa je
+        # izgledalo kao da funkcionalnost ne postoji, bez traga zašto.
+        self.btn_load_max = self.file_zone.btn_max
         self.btn_load_max.clicked.connect(self._on_load_max)
-        lv.addWidget(self.btn_load_max)
 
-        # Kartica učitanog fajla
-        self.file_card = QFrame()
-        self.file_card.setObjectName("fileCard")
-        self.file_card.setVisible(False)
-        fcv = QHBoxLayout(self.file_card)
-        fcv.setContentsMargins(12, 10, 12, 10); fcv.setSpacing(10)
-        self.file_icon = QLabel("📄")
-        self.file_icon.setStyleSheet("font-size:20px; background:transparent;")
-        finfo = QVBoxLayout(); finfo.setSpacing(1)
-        self.lbl_fname = QLabel("—")
-        self.lbl_fname.setStyleSheet(
-            "font-size:13px; font-weight:500; color:#fff; background:transparent;")
-        self.lbl_fsize = QLabel("—")
-        self.lbl_fsize.setStyleSheet(
-            "font-size:11px; color:#666; background:transparent;")
-        finfo.addWidget(self.lbl_fname); finfo.addWidget(self.lbl_fsize)
-        btn_change = QPushButton("Zameni")
-        btn_change.setFixedHeight(26)
-        btn_change.setToolTip("Učitaj drugi fajl")
-        btn_change.setStyleSheet(
-            "QPushButton { background:#2e3140; border:none; border-radius:5px;"
-            " color:#aaa; font-size:11px; padding: 0 8px; }"
-            "QPushButton:hover { background:#3a3f55; color:#fff; }"
-        )
-        btn_change.clicked.connect(self._on_change_file)
-        fcv.addWidget(self.file_icon); fcv.addLayout(finfo); fcv.addStretch()
-        fcv.addWidget(btn_change)
-        lv.addWidget(self.file_card)
+        # Labela uvek zauzima svoju visinu — i kad Max nije nađen. Sakrivanje
+        # bi pomerilo sve ispod nje.
+        self.lbl_max_path = self.file_zone.lbl_max
+        self.lbl_max_path.mousePressEvent = lambda e: self._pick_max_exe()
+
+        self._refresh_max_ui()
         return w
 
     def _section_optimization(self):
@@ -365,14 +536,13 @@ class MainWindow(QMainWindow):
         lv = QVBoxLayout(w); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(10)
         lv.addWidget(_section_label("OPTIMIZACIJA MREŽE"))
 
+        # Stilovi ovih labela žive u styles.qss (a ne inline) da bi imali i
+        # :disabled varijantu — cela sekcija se prigušuje dok nema fajla.
         row = QHBoxLayout()
         lbl = QLabel("Jačina smanjenja")
-        lbl.setStyleSheet(
-            "font-size:13px; font-weight:500; color:#e0e0e0; background:transparent;")
+        lbl.setObjectName("optLabel")
         self.lbl_ratio = QLabel("−70%")
-        self.lbl_ratio.setStyleSheet(
-            "font-size:13px; font-weight:500; color:#fff; "
-            "background:#2e3140; border-radius:12px; padding:2px 8px;")
+        self.lbl_ratio.setObjectName("ratioPill")
         row.addWidget(lbl); row.addStretch(); row.addWidget(self.lbl_ratio)
         lv.addLayout(row)
 
@@ -382,7 +552,7 @@ class MainWindow(QMainWindow):
         lv.addWidget(self.slider)
 
         self.lbl_hint = QLabel("Zadržava se ~30% trouglova")
-        self.lbl_hint.setStyleSheet("font-size:11px; color:#555; background:transparent;")
+        self.lbl_hint.setObjectName("optHint")
         lv.addWidget(self.lbl_hint)
 
         lv.addWidget(_section_label("METODA DECIMACIJE"))
@@ -422,7 +592,7 @@ class MainWindow(QMainWindow):
 
     def _section_buttons(self):
         w = QWidget(); w.setStyleSheet("background:transparent;")
-        lv = QVBoxLayout(w); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(8)
+        lv = QVBoxLayout(w); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(6)
 
         self.btn_convert = QPushButton("↻  Konvertuj i prikaži")
         self.btn_convert.setObjectName("btnConvert")
@@ -430,9 +600,11 @@ class MainWindow(QMainWindow):
         self.btn_convert.clicked.connect(self._on_decimate)
         lv.addWidget(self.btn_convert)
 
-        prog_wrap = QWidget(); prog_wrap.setFixedHeight(18)
+        # Traka drži svoje mesto i kad je nevidljiva (da dugmad ne skaču), ali
+        # je razmak bio 34px ukupno — previše za 6px traku. Sada 22px.
+        prog_wrap = QWidget(); prog_wrap.setFixedHeight(10)
         prog_wl = QVBoxLayout(prog_wrap)
-        prog_wl.setContentsMargins(0, 6, 0, 6)
+        prog_wl.setContentsMargins(0, 2, 0, 2)
         self.progress = SweepBar()
         prog_wl.addWidget(self.progress)
         lv.addWidget(prog_wrap)
@@ -516,12 +688,14 @@ class MainWindow(QMainWindow):
     def _refresh(self):
         loaded    = self.model.is_loaded()
         decimated = self.model.has_decimated()
-        busy      = self.worker is not None or self.load_worker is not None
+        busy      = any((self.worker, self.load_worker, self.max_worker))
 
         self.btn_convert.setEnabled(loaded and not busy)
         self.btn_ascii.setEnabled(loaded and not busy)
         self.btn_obj.setEnabled(loaded and not busy)
-        self.slider.setEnabled(loaded and not busy)
+        # Cela sekcija, ne samo slajder — radio dugmad su ranije izgledala
+        # aktivno iako nisu radila ništa dok nema fajla.
+        self._opt_section.setEnabled(loaded and not busy)
 
         s = self.model.stats_dict()
 
@@ -553,38 +727,37 @@ class MainWindow(QMainWindow):
         self.lbl_hint.setText(f"Zadržava se ~{100 - v}% trouglova")
 
     # ── Učitavanje fajla ─────────────────────────────────────────────
-    def _on_change_file(self):
-        """Zamena fajla — prikaži upload zonu, sakrij karticu."""
-        self.file_card.setVisible(False)
-        self.upload_zone.setVisible(True)
-        self.btn_load_max.setVisible(self.max_exe is not None)
+    @staticmethod
+    def _human_size(path: str) -> str:
+        kb = Path(path).stat().st_size // 1024
+        return f"{kb / 1024:.1f} MB" if kb >= 1024 else f"{kb} KB"
 
-    def _on_drop_or_click(self, path: str):
-        if not path:
-            last = self.settings.value("last_dir", "")
-            path, _ = QFileDialog.getOpenFileName(
-                self, "Učitaj ASCII mesh fajl", last,
-                "ASCII Mesh (*.txt);;Svi fajlovi (*)")
-        if not path:
-            return
-        self._load_file(path)
+    def _on_browse(self):
+        last = self.settings.value("last_dir", "")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Učitaj ASCII mesh fajl", last,
+            "ASCII Mesh (*.txt);;Svi fajlovi (*)")
+        if path:
+            self._load_file(path)
+
+    def _restore_zone(self):
+        """Vrati zonu na stanje koje odgovara modelu (posle neuspeha)."""
+        if self.model.is_loaded() and self.model.source_path:
+            src = self.model.source_path
+            o = self.model.original_stats()
+            self.file_zone.set_loaded(
+                Path(src).name, f"{self._human_size(src)} · {o.verts:,} tačaka")
+        else:
+            self.file_zone.set_empty()
 
     def _load_file(self, path: str):
         if self.load_worker or self.worker:
             self.status.showMessage("Sačekajte da se prethodni posao završi…")
             return
 
-        # Odmah pokažemo koji fajl se učitava — bolji feedback
         name = Path(path).name
-        size_kb = Path(path).stat().st_size // 1024
-        size_str = f"{size_kb / 1024:.1f} MB" if size_kb >= 1024 else f"{size_kb} KB"
-        self.file_icon.setText("⏳")
-        self.lbl_fname.setText(name)
-        self.lbl_fsize.setText(f"{size_str} · čitanje…")
-        self.upload_zone.setVisible(False)
-        self.btn_load_max.setVisible(False)
-        self.file_card.setVisible(True)
-        self.progress.start()
+        size_str = self._human_size(path)
+        self.file_zone.set_loading(name, f"{size_str} · čitanje…")
         self.status.showMessage(f"Čitanje: {name} ({size_str})…")
         self._pending_path = path
 
@@ -596,24 +769,26 @@ class MainWindow(QMainWindow):
 
     def _on_load_done(self, elapsed: float):
         self.load_worker = None
-        self.progress.stop()
         path = getattr(self, "_pending_path", "")
         self.settings.setValue("last_dir", str(Path(path).parent))
         name = Path(path).name
-        size_kb = Path(path).stat().st_size // 1024
-        size_str = f"{size_kb / 1024:.1f} MB" if size_kb >= 1024 else f"{size_kb} KB"
-        self.file_icon.setText("📄")
-        self.lbl_fsize.setText(f"{size_str} · ASCII Mesh")
+        o = self.model.original_stats()
+        self.file_zone.set_loaded(
+            name, f"{self._human_size(path)} · {o.verts:,} tačaka")
 
         self.status.showMessage("Priprema 3D prikaza…")
-        # Osvežimo Qt odmah da se poruka vidi pre nego što render zauzme UI
+        # Render velikog mesha drži main thread; wait kursor je jedini signal
+        # da app radi, jer se u međuvremenu ništa ne iscrtava.
         QApplication.processEvents()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.viewer.show_original(self.model.original_verts,
+                                      self.model.original_faces)
+            self.viewer.clear_after()
+        finally:
+            QApplication.restoreOverrideCursor()
 
-        self.viewer.show_original(self.model.original_verts,
-                                  self.model.original_faces)
-        self.viewer.clear_after()
         self._refresh()
-        o = self.model.original_stats()
         self.status.showMessage(
             f"Učitano za {elapsed:.2f}s — {name} "
             f"({o.verts:,} tačaka, {o.faces:,} trouglova)"
@@ -621,18 +796,49 @@ class MainWindow(QMainWindow):
 
     def _on_load_error(self, msg: str):
         self.load_worker = None
-        self.progress.stop()
-        self.file_card.setVisible(False)
-        self.upload_zone.setVisible(True)
-        self.btn_load_max.setVisible(self.max_exe is not None)
-        self.file_icon.setText("📄")
+        self._restore_zone()
         self._refresh()
         self.status.showMessage(f"Greška pri učitavanju: {msg}")
 
     # ── .max konverzija ──────────────────────────────────────────────
+    def _refresh_max_ui(self):
+        """Tekst dugmeta i putanje zavise od toga da li je Max pronađen."""
+        if self.max_exe:
+            ver = max_version_from_path(self.max_exe)
+            self.btn_load_max.setText("⬆  Učitaj .max fajl")
+            self.btn_load_max.setToolTip(self.max_exe)
+            self.lbl_max_path.setText(f"3ds Max {ver}  ·  promeni")
+            self.lbl_max_path.setToolTip(self.max_exe)
+        else:
+            # Labela ostaje vidljiva — sakrivanje bi pomerilo sve ispod nje.
+            self.btn_load_max.setText("🔗  Poveži 3ds Max…")
+            self.btn_load_max.setToolTip("Izaberi 3dsmax.exe ručno")
+            self.lbl_max_path.setText("Potreban samo za .max fajlove")
+            self.lbl_max_path.setToolTip("")
+
+    def _pick_max_exe(self) -> bool:
+        """Ručni izbor 3dsmax.exe. Izbor se pamti između pokretanja."""
+        start = os.path.dirname(self.max_exe) if self.max_exe else ""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Izaberi 3dsmax.exe", start, "3ds Max (3dsmax.exe)"
+        )
+        if not path:
+            return False
+
+        save_max_exe(path)
+        self.max_exe = path
+        self._refresh_max_ui()
+        self.status.showMessage(f"3ds Max povezan: {path}")
+        return True
+
     def _on_load_max(self):
         if self.max_worker or self.load_worker or self.worker:
             return
+
+        # Max nije pronađen — prvo ga poveži, pa tek onda biraj .max fajl.
+        if not self.max_exe and not self._pick_max_exe():
+            return
+
         path, _ = QFileDialog.getOpenFileName(
             self, "Izaberi .max fajl", "", "3ds Max fajlovi (*.max)"
         )
@@ -643,7 +849,9 @@ class MainWindow(QMainWindow):
         out_txt = str(_Path(path).with_suffix(".txt"))
         ms_script = str(_Path(__file__).parent.parent / "core" / "export_ascii.ms")
 
-        self.progress.start()
+        # Konverzija koristi istu zonu kao i učitavanje — jedno mesto za
+        # napredak, umesto trake dole kod dugmeta za decimaciju.
+        self.file_zone.set_loading(_Path(path).name, "konverzija u 3ds Max…")
         self.btn_load_max.setEnabled(False)
         self.status.showMessage(f"Konverzija .max → ASCII: {_Path(path).name}…")
 
@@ -651,20 +859,19 @@ class MainWindow(QMainWindow):
         self.max_worker.finished.connect(self._on_max_done)
         self.max_worker.error.connect(self._on_max_error)
         self.max_worker.start()
+        self._refresh()
 
     def _on_max_done(self, txt_path: str):
         self.max_worker = None
-        self.progress.stop()
         self.btn_load_max.setEnabled(True)
         self.status.showMessage("Konverzija završena — učitavam mesh…")
         self._load_file(txt_path)
 
     def _on_max_error(self, msg: str):
         self.max_worker = None
-        self.progress.stop()
-        self.upload_zone.setVisible(True)
-        self.btn_load_max.setVisible(True)
         self.btn_load_max.setEnabled(True)
+        self._restore_zone()
+        self._refresh()
         self.status.showMessage(f"Greška pri konverziji: {msg}")
 
     # ── Decimacija ───────────────────────────────────────────────────

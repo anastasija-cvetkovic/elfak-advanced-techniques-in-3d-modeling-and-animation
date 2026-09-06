@@ -39,28 +39,51 @@ QLabel#appSubtitle {
     background: transparent;
 }
 
-/* Upload zona */
-QFrame#uploadZone {
+/* Zona za fajl — ista visina u sva tri stanja, menja se samo izgled okvira.
+   Redosled je bitan: dragActive mora biti poslednji da nadjača state-ove. */
+QFrame#fileZone {
     border: 1.5px dashed #3a3e52;
     border-radius: 10px;
     background: #1e2130;
 }
 
-QFrame#uploadZone:hover {
+QFrame#fileZone[state="empty"]:hover {
     border-color: #4a5080;
     background: #22263a;
 }
 
-QFrame#uploadZone[dragActive="true"] {
-    border-color: #4a7adf;
+QFrame#fileZone[state="loading"] {
+    border: 1px solid #3a4a6a;
+    background: #1e2436;
+}
+
+QFrame#fileZone[state="loaded"] {
+    border: 1px solid #2e3140;
+    background: #252830;
+}
+
+QFrame#fileZone[state="loaded"]:hover {
+    border-color: #3a3e52;
+}
+
+QFrame#fileZone[dragActive="true"] {
+    border: 1.5px dashed #4a7adf;
     background: #253055;
 }
 
-/* Fajl info kartica */
-QFrame#fileCard {
-    background: #252830;
-    border-radius: 8px;
-    border: none;
+/* Dugme za izbor drugog fajla, unutar zone */
+QPushButton#btnPickAnother {
+    background: #2e3140;
+    border: 1px solid #3a3e52;
+    border-radius: 5px;
+    color: #cfd3dd;
+    font-size: 11px;
+    padding: 0 9px;
+}
+
+QPushButton#btnPickAnother:hover {
+    background: #3a3f55;
+    color: #fff;
 }
 
 /* Sekcije */
@@ -72,11 +95,56 @@ QLabel#sectionLabel {
     background: transparent;
 }
 
+QLabel#sectionLabel:disabled {
+    color: #3a3d47;
+}
+
+/* Sekcija optimizacije — sve ima :disabled varijantu jer se cela sekcija
+   prigušuje dok fajl nije učitan. */
+QLabel#optLabel {
+    font-size: 13px;
+    font-weight: 500;
+    color: #e0e0e0;
+    background: transparent;
+}
+
+QLabel#optLabel:disabled {
+    color: #55596a;
+}
+
+QLabel#ratioPill {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    background: #2e3140;
+    border-radius: 12px;
+    padding: 2px 8px;
+}
+
+QLabel#ratioPill:disabled {
+    color: #6b7280;
+    background: #24262f;
+}
+
+QLabel#optHint {
+    font-size: 11px;
+    color: #555;
+    background: transparent;
+}
+
+QLabel#optHint:disabled {
+    color: #3a3d47;
+}
+
 /* Slider */
 QSlider::groove:horizontal {
     background: #2e3140;
     height: 4px;
     border-radius: 2px;
+}
+
+QSlider::groove:horizontal:disabled {
+    background: #24262f;
 }
 
 QSlider::handle:horizontal {
@@ -92,9 +160,18 @@ QSlider::handle:horizontal:hover {
     background: #e0e0e0;
 }
 
+QSlider::handle:horizontal:disabled {
+    background: #3a3d47;
+    border-color: #2e3140;
+}
+
 QSlider::sub-page:horizontal {
     background: #4a5a8a;
     border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal:disabled {
+    background: #2e3140;
 }
 
 /* Radio */
@@ -117,6 +194,19 @@ QRadioButton::indicator {
 QRadioButton::indicator:checked {
     background: #4a7adf;
     border-color: #4a7adf;
+}
+
+QRadioButton:disabled {
+    color: #55596a;
+}
+
+QRadioButton::indicator:disabled {
+    border-color: #2e3140;
+}
+
+QRadioButton::indicator:checked:disabled {
+    background: #33405c;
+    border-color: #33405c;
 }
 
 /* Dugmad */
@@ -145,18 +235,36 @@ QPushButton:disabled {
     background: #1e2130;
 }
 
+/* .max kontrole — podnožje unutar zone za fajl */
 QPushButton#btnLoadMax {
     background: #1e2a1e;
     color: #7ec87e;
     border: 1px solid #2e4a2e;
     border-radius: 6px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
+    padding: 0 8px;
 }
 
 QPushButton#btnLoadMax:hover {
     background: #253525;
     color: #a0e0a0;
+}
+
+QPushButton#btnLoadMax:disabled {
+    background: #1c211c;
+    color: #3d5c3d;
+    border-color: #253525;
+}
+
+QLabel#maxPathHint {
+    color: #6b7280;
+    font-size: 10px;
+    background: transparent;
+}
+
+QLabel#maxPathHint:hover {
+    color: #8b93a3;
 }
 
 QPushButton#btnConvert {
