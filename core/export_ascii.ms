@@ -7,24 +7,42 @@
 --     x y z          (po jedan red za svaku tacku)
 --     a b c          (po jedan red za svaki trougao, indeksi 0-based)
 --
--- Radi u DVA rezima:
+-- Poziva se iz core/converter.py, koji putanje prosledjuje kroz promenljive
+-- okoline MAX_INPUT i MAX_OUTPUT. Bez njih radi interaktivno, sa dijalogom.
 --
---  1) HEADLESS — kada su postavljene promenljive okoline MAX_INPUT i MAX_OUTPUT.
---     Ucitava .max fajl, exportuje i zatvara Max. Bez ijednog dijaloga.
---     Ovako ga zove core/converter.py::export_from_max_headless.
+-- VAZNO: ceo posao je umotan u try/catch i greska se upisuje u <izlaz>.err.
+-- Skripta se pokrece kao startup script (-U MAXScript); ako startup skripta
+-- baci izuzetak, Max to prijavi kao pad instalacije i ponudi "Restore Factory
+-- Settings", sto zbunjuje korisnika. Zato odavde ne sme da izadje izuzetak.
 --
---  2) INTERAKTIVNO — kada promenljive nisu postavljene. Exportuje trenutnu
---     scenu i pita korisnika gde da sacuva.
+-- FORMAT BROJEVA: formattedPrint format:".6f" daje isti zapis kao profesorov
+-- TORUS.txt ("102.921271 -0.000006 -65.231792"). Obican `format "%" v.x` NE
+-- valja jer stampa 6 znacajnih cifara i prelazi u naucnu notaciju, pa bi
+-- -0.000006 ispalo kao "-6e-06".
 --
--- Sva geometrija u sceni se spaja u JEDNU listu tacaka i trouglova, sa
--- pomeranjem indeksa. To odgovara profesorovim primerima: elisa.txt je jedan
--- fajl koji sadrzi 4 nepovezane komponente (glavcina + tri lopatice).
+-- KOORDINATE: pisu se sirovo, tacno kako stoje u Max-u. Provereno merenjem:
+-- 1.max exportovan ovom skriptom i uporedjen sa profesorovom elisa.txt (isti
+-- model) -> 673/1042 tacaka se poklapa (64.6%) sa sirovim koordinatama, a
+-- 0/1042 ako se radi Y-up zamena osa. Dakle nikakva konverzija se ne radi.
 --------------------------------------------------------------------------------
+
+fn writeError errPath msg = (
+    -- Greska ide i u Listener i u fajl, da je Python strana moze procitati.
+    format "GRESKA: %\n" msg
+    if errPath != undefined and errPath != "" then (
+        try (
+            local ef = createFile errPath
+            if ef != undefined then (
+                format "%\n" msg to:ef
+                close ef
+            )
+        ) catch ()
+    )
+)
 
 fn collectMeshObjects = (
     local result = #()
     for o in geometry do (
-        if (isDeleted o) then continue
         if (canConvertTo o TriMeshGeometry) then append result o
     )
     result
@@ -32,16 +50,14 @@ fn collectMeshObjects = (
 
 fn exportSceneToASCII outPath = (
     local objs = collectMeshObjects()
-    if objs.count == 0 then (
-        format "GRESKA: u sceni nema geometrije koja se moze konvertovati u mesh.\n"
-        return false
-    )
+    if objs.count == 0 then
+        throw "u sceni nema geometrije koja se moze konvertovati u mesh"
 
-    -- snapshotAsMesh primenjuje transformaciju objekta, pa su koordinate
-    -- vec u svetskom prostoru — isto kao u profesorovim primerima.
-    local meshes   = #()
-    local totalV   = 0
-    local totalF   = 0
+    -- snapshotAsMesh primenjuje transformaciju objekta, pa su koordinate vec
+    -- u svetskom prostoru.
+    local meshes = #()
+    local totalV = 0
+    local totalF = 0
     for o in objs do (
         local m = snapshotAsMesh o
         append meshes m
@@ -49,12 +65,10 @@ fn exportSceneToASCII outPath = (
         totalF += m.numfaces
     )
 
-    local f = openFile outPath mode:"w"
-    if f == undefined then (
-        for m in meshes do delete m
-        format "GRESKA: ne mogu da otvorim izlazni fajl: %\n" outPath
-        return false
-    )
+    -- createFile, ne openFile — openFile je za citanje postojeceg fajla.
+    local f = createFile outPath
+    if f == undefined then
+        throw ("ne mogu da otvorim izlazni fajl: " + outPath)
 
     format "%\n" totalV to:f
     format "%\n" totalF to:f
@@ -63,29 +77,31 @@ fn exportSceneToASCII outPath = (
     for m in meshes do (
         for i = 1 to m.numverts do (
             local v = getVert m i
-            format "% % %\n" v.x v.y v.z to:f
+            local sx = formattedPrint v.x format:".6f"
+            local sy = formattedPrint v.y format:".6f"
+            local sz = formattedPrint v.z format:".6f"
+            format "% % %\n" sx sy sz to:f
         )
     )
 
-    -- 2) svi trouglovi; MAXScript indeksira od 1, format iz zadatka od 0,
-    --    a svaki sledeci objekat se pomera za broj vec ispisanih tacaka.
+    -- 2) svi trouglovi; MAXScript indeksira od 1, format iz zadatka od 0, a
+    --    svaki sledeci objekat se pomera za broj vec ispisanih tacaka.
     local offset = 0
     for m in meshes do (
         for i = 1 to m.numfaces do (
             local fc = getFace m i
-            format "% % %\n" \
-                ((fc.x as integer) - 1 + offset) \
-                ((fc.y as integer) - 1 + offset) \
-                ((fc.z as integer) - 1 + offset) to:f
+            local ia = (fc.x as integer) - 1 + offset
+            local ib = (fc.y as integer) - 1 + offset
+            local ic = (fc.z as integer) - 1 + offset
+            format "% % %\n" ia ib ic to:f
         )
         offset += m.numverts
     )
 
-    closeFile f
-    for m in meshes do delete m
+    close f
+    try (for m in meshes do delete m) catch ()
 
-    format "OK: % objekata, % tacaka, % trouglova -> %\n" \
-        objs.count totalV totalF outPath
+    format "OK: % objekata, % tacaka, % trouglova -> %\n" objs.count totalV totalF outPath
     true
 )
 
@@ -93,40 +109,43 @@ fn exportSceneToASCII outPath = (
 -- Ulazna tacka
 --------------------------------------------------------------------------------
 
-local inPath  = systemTools.getEnvVariable "MAX_INPUT"
-local outPath = systemTools.getEnvVariable "MAX_OUTPUT"
+(
+    local inPath = undefined
+    local outPath = undefined
+    local errPath = undefined
 
-if outPath != undefined and outPath != "" then (
-    -- ── HEADLESS ──────────────────────────────────────────────────────────
-    local ok = false
-    if inPath != undefined and inPath != "" then (
-        if not (doesFileExist inPath) then
-            format "GRESKA: ulazni .max fajl ne postoji: %\n" inPath
-        else if not (loadMaxFile inPath quiet:true) then
-            format "GRESKA: loadMaxFile nije uspeo: %\n" inPath
-        else
-            ok = exportSceneToASCII outPath
+    try (
+        inPath  = systemTools.getEnvVariable "MAX_INPUT"
+        outPath = systemTools.getEnvVariable "MAX_OUTPUT"
+    ) catch ()
+
+    if outPath != undefined and outPath != "" then errPath = outPath + ".err"
+
+    try (
+        if outPath != undefined and outPath != "" then (
+            -- Automatski rezim: putanje su stigle iz aplikacije.
+            if inPath != undefined and inPath != "" then (
+                if not (doesFileExist inPath) then
+                    throw ("ulazni .max fajl ne postoji: " + inPath)
+                if not (loadMaxFile inPath quiet:true) then
+                    throw ("loadMaxFile nije uspeo: " + inPath)
+            )
+            exportSceneToASCII outPath
+            quitMax #noPrompt
+        )
+        else (
+            -- Interaktivni rezim: exportuj trenutnu scenu, pitaj gde.
+            local defaultPath = maxFilePath + (getFilenameFile maxFileName) + "_mesh.txt"
+            local savePath = getSaveFileName caption:"Sacuvaj ASCII mesh" filename:defaultPath types:"Text files (*.txt)|*.txt|All files (*.*)|*.*"
+            if savePath != undefined then (
+                exportSceneToASCII savePath
+                messageBox ("Export zavrsen:\n" + savePath)
+            )
+        )
     )
-    else
-        -- MAX_OUTPUT bez MAX_INPUT: exportuj scenu koja je vec ucitana
-        ok = exportSceneToASCII outPath
-
-    -- Ako export nije uspeo, izlazni fajl ne postoji i Python strana
-    -- (converter.py) to prijavljuje kao gresku.
-    quitMax #noPrompt
-)
-else (
-    -- ── INTERAKTIVNO ──────────────────────────────────────────────────────
-    local defaultPath = maxFilePath + (getFilenameFile maxFileName) + "_mesh.txt"
-    local savePath = getSaveFileName \
-        caption:"Sacuvaj ASCII mesh" \
-        filename:defaultPath \
-        types:"Text files (*.txt)|*.txt|All files (*.*)|*.*"
-
-    if savePath != undefined then (
-        if exportSceneToASCII savePath then
-            messageBox ("Export zavrsen:\n" + savePath)
-        else
-            messageBox "Export nije uspeo. Pogledaj MAXScript Listener za detalje."
+    catch (
+        -- Nijedan izuzetak ne sme da izadje iz startup skripte.
+        writeError errPath (getCurrentException())
+        if outPath != undefined and outPath != "" then quitMax #noPrompt
     )
 )
