@@ -673,7 +673,10 @@ class MainWindow(QMainWindow):
             return
         pct    = self.slider.value()
         ratio  = 1.0 - pct / 100.0
-        method = "pyfqmr" if self.rb_qec.isChecked() else "cluster"
+        # "auto" bira najbolju dostupnu metodu (VTK → pyfqmr → QEM → cluster).
+        # Ranije je bilo hardkodovano "pyfqmr", koji na elisi ne dostiže target
+        # i gubi konturu — vidi core/decimator.py i .claude/ZADATAK.md.
+        method = "auto" if self.rb_qec.isChecked() else "cluster"
         self.progress.start()
         self.btn_convert.setEnabled(False)
         self.status.showMessage(f"Konverzija u toku ({pct}% smanjenje, {method})...")

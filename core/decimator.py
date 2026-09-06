@@ -1,9 +1,21 @@
 """
 core/decimator.py
 Decimacija mesh-a sa chain fallback strategijom:
-  pyfqmr → fast_simplification (QEM) → vertex_clustering
+  VTK decimate → pyfqmr → fast_simplification (QEM) → vertex_clustering
 
 Sav I/O radi na numpy nizovima za brzinu i konzistentnost.
+
+Redosled lanca je izmeren na `elisa.txt` (ratio 0.3, target 772 trougla) — vidi
+`.claude/ZADATAK.md`. Ukratko, VTK je jedini koji uopšte dostiže target:
+
+  metoda                rezultat        maxErr   rast bbox-a
+  VTK decimate          389v /  772f      5.87        0.01
+  pyfqmr (aggr=7)       588v / 1188f     45.81        7.32
+  fast_simplification   588v / 1188f     45.81        7.32
+
+pyfqmr na ovom meshu ne može da dostigne target bez uništavanja konture: na
+aggressiveness=5 greška je prihvatljivih 9.24 ali staje na 1522 trougla, a na
+aggressiveness=7 dostiže 1188 uz grešku od 45.81 (18.5% veličine modela).
 """
 
 from __future__ import annotations
@@ -24,7 +36,12 @@ def decimate(
     verts   — np.ndarray (N, 3) float
     faces   — np.ndarray (M, 3) int
     ratio   — 0.0–1.0; 0.5 = 50% originalnog broja trouglova
-    method  — "auto" | "pyfqmr" | "qem" | "cluster" | "uniform"
+    method  — "auto" | "vtk" | "vtk_pro" | "pyfqmr" | "qem" | "cluster"
+
+    "vtk"     — VTK/pyvista quadric decimate. Najbolji odnos target/greška.
+    "vtk_pro" — VTK decimate_pro; samo uklanja temena, nikad ih ne pomera, pa
+                nijedna nova tačka ne može da izađe van originalne siluete.
+                Nešto veća greška od "vtk", ali daje najjaču garanciju konture.
     """
     verts = np.asarray(verts, dtype=np.float64)
     faces = np.asarray(faces, dtype=np.int32)
@@ -34,6 +51,13 @@ def decimate(
 
     target_f = max(4, int(len(faces) * ratio))
     target_v = max(4, int(len(verts) * ratio))
+
+    if method in ("vtk", "vtk_pro", "uniform"):
+        # "uniform" je zadržan kao alias radi kompatibilnosti sa starijim pozivima
+        result = _try_vtk(verts, faces, target_f, pro=(method == "vtk_pro"))
+        if result is not None:
+            return result
+        raise RuntimeError("VTK decimacija nije uspela (pyvista nedostupan?).")
 
     if method == "pyfqmr":
         result = _try_pyfqmr(verts, faces, target_f)
@@ -50,25 +74,81 @@ def decimate(
     if method == "cluster":
         return _vertex_clustering(verts, faces, target_v)
 
-    if method == "uniform":
-        result = _uniform_remesh(verts, faces, target_v)
-        if result is not None:
-            return result
-        result = _try_pyfqmr(verts, faces, target_f)
-        if result is not None:
-            return result
+    # auto — pokreni sve dostupne kandidate i izaberi merenjem, ne redosledom.
+    # Nijedna metoda nije univerzalno najbolja: na `elisa.txt` VTK je 7.8x
+    # precizniji od pyfqmr-a (5.87 vs 45.81), a na `TORUS.txt` je pyfqmr bolji
+    # (22.32 vs 27.01). Meshevi iz zadatka su reda hiljadu tačaka, pa je cena
+    # pokretanja obe metode zanemarljiva u odnosu na dobitak.
+    candidates = []
+    for fn in (_try_vtk, _try_pyfqmr, _try_qem):
+        r = fn(verts, faces, target_f)
+        if r is not None and len(r[1]) > 0:
+            candidates.append(r)
+
+    if not candidates:
         return _vertex_clustering(verts, faces, target_v)
 
-    # auto — proba redom, uvek završi
-    result = _try_pyfqmr(verts, faces, target_f)
-    if result is not None:
-        return result
+    return min(candidates, key=lambda r: _shape_error(verts, r[0], target_f, len(r[1])))
 
-    result = _try_qem(verts, faces, target_f)
-    if result is not None:
-        return result
 
-    return _vertex_clustering(verts, faces, target_v)
+# ── Ocenjivanje kandidata ─────────────────────────────────────────────────────
+
+def _max_nn_distance(src: np.ndarray, dst: np.ndarray) -> float:
+    """
+    Najveća udaljenost tačke iz `src` do najbliže tačke u `dst`.
+
+    Koristi scipy cKDTree. Izmereno naspram ručne BLAS varijante (O(n·m)):
+
+        tačaka        BLAS      cKDTree
+         1 317       7.9 ms      3.3 ms
+        20 000     1 630 ms     22.6 ms   (72x)
+       300 000   293 000 ms    484.8 ms   (605x)
+
+    cKDTree pobeđuje na svim veličinama, a brute-force pristup postaje potpuno
+    neupotrebljiv na realnim .max eksportima od 100k+ tačaka. Zato je scipy
+    uveden kao zavisnost; numpy fallback ispod postoji samo da aplikacija ne
+    pukne ako scipy nedostaje, uz kaznu na velikim meshevima.
+    """
+    try:
+        from scipy.spatial import cKDTree
+        return float(cKDTree(dst).query(src)[0].max())
+    except ImportError:
+        pass
+
+    dst_sq = (dst ** 2).sum(axis=1)          # |b|²
+    worst = 0.0
+    step = max(1, 4_000_000 // max(1, len(dst)))
+    for i in range(0, len(src), step):
+        chunk = src[i:i + step]
+        # |a-b|² = |a|² - 2ab + |b|² — izbegava (n, m, 3) međurezultat.
+        d2 = (chunk ** 2).sum(axis=1)[:, None] - 2.0 * (chunk @ dst.T) + dst_sq[None, :]
+        worst = max(worst, float(np.sqrt(max(0.0, d2.min(axis=1).max()))))
+    return worst
+
+
+def _shape_error(
+    orig_verts: np.ndarray, new_verts: np.ndarray, target_f: int, got_f: int
+) -> float:
+    """
+    Manje je bolje. Kombinuje tri stvari koje zadatak traži:
+
+    1. geometrijsku vernost — najveće odstupanje originalnih tačaka,
+    2. očuvanje siluete — kazna ako rezultat izađe van originalnog bbox-a,
+    3. dostizanje targeta — kazna ako metoda stane pre traženog broja trouglova.
+    """
+    err = _max_nn_distance(orig_verts, new_verts)
+
+    lo0, hi0 = orig_verts.min(axis=0), orig_verts.max(axis=0)
+    grow = max(
+        float(np.max(new_verts.max(axis=0) - hi0)),
+        float(np.max(lo0 - new_verts.min(axis=0))),
+        0.0,
+    )
+
+    # Promašen target skalira grešku srazmerno promašaju (1188 umesto 772 -> x1.54)
+    miss = max(1.0, got_f / max(1, target_f))
+
+    return (err + 5.0 * grow) * miss
 
 
 # ── Implementacije ────────────────────────────────────────────────────────────
@@ -78,7 +158,13 @@ def _try_pyfqmr(
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """
     Quadric Edge Collapse — pyfqmr.
-    Čuva konture zahvaljujući preserve_border=True.
+
+    Napomena: `preserve_border=True` NE pomaže na zatvorenim meshevima kakvi su
+    oba primera iz zadatka — i `TORUS.txt` i `elisa.txt` imaju 0 border ivica
+    (svaka ivica pripada tačno dvama trouglovima), pa True i False daju merljivo
+    identičan rezultat. Ono što ovde stvarno određuje vernost konture je
+    `aggressiveness`; na 7 greška na elisi ide do 45.81 (18.5% veličine modela).
+    Zato je pyfqmr sada tek druga opcija, iza `_try_vtk`.
     """
     try:
         import pyfqmr
@@ -112,24 +198,21 @@ def _try_qem(
     try:
         import fast_simplification as fs
 
-        # fast_simplification očekuje flat cells niz sa vodećom brojkom 3
-        n = len(faces)
-        cells = np.empty((n, 4), dtype=np.int32)
-        cells[:, 0]  = 3
-        cells[:, 1:] = faces
-        cells = cells.flatten()
-
+        # fast_simplification traži trouglove kao 2D (N, 3) niz. Ranija verzija
+        # je slala flat [3, i, j, k, ...] niz i uvek pucala sa
+        # "ValueError: ``triangles`` array must be 2 dimensional" — izuzetak je
+        # gutao `except Exception` ispod, pa je ova grana bila mrtav kod.
         target_ratio = 1.0 - (target_faces / max(1, len(faces)))
         target_ratio = float(np.clip(target_ratio, 0.0, 0.99))
 
-        pts_out, cells_out = fs.simplify(
-            verts.astype(np.float64), cells, target_reduction=target_ratio
+        pts_out, faces_out = fs.simplify(
+            verts.astype(np.float64),
+            np.ascontiguousarray(faces, dtype=np.int32),
+            target_reduction=target_ratio,
         )
 
-        # cells_out je varijadičan format: [3, i, j, k, 3, i, j, k, ...]
-        # jer smo poslali samo trouglove, možemo direktno da reshape-ujemo
-        faces_out = cells_out.reshape(-1, 4)[:, 1:].astype(np.int32)
-        return np.asarray(pts_out, dtype=np.float64), faces_out
+        return (np.asarray(pts_out, dtype=np.float64),
+                np.asarray(faces_out, dtype=np.int32))
 
     except ImportError:
         return None
@@ -137,12 +220,21 @@ def _try_qem(
         return None
 
 
-def _uniform_remesh(
-    verts: np.ndarray, faces: np.ndarray, target_verts: int
+def _try_vtk(
+    verts: np.ndarray, faces: np.ndarray, target_faces: int, pro: bool = False
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """
-    Uniform remesh via PyVista decimate + laplacian smooth.
-    Daje ravnomernije raspoređene trouglove od QEC.
+    VTK/pyvista quadric decimate — primarna metoda.
+
+    NAMERNO bez laplacian smooth-a. Raniја verzija je posle decimacije radila
+    `smooth(n_iter=30, relaxation_factor=0.1)`, što skuplja model i uništava
+    upravo ono što zadatak traži da se sačuva — na `elisa.txt` je raspon padao
+    sa [247.3 234.6 63.5] na [203.6 181.4 35.8], dakle do 44% gubitka. Ako
+    ikada zatreba ravnomernija raspodela trouglova, smoothing mora da bude
+    zaseban, eksplicitan korak — ne deo decimacije.
+
+    pro=True koristi `decimate_pro`, koji samo uklanja postojeća temena i nikad
+    ih ne pomera: nijedna nova tačka ne može da izađe van originalne siluete.
     """
     try:
         import pyvista as pv
@@ -151,17 +243,20 @@ def _uniform_remesh(
         cells = np.empty((n, 4), dtype=np.int32)
         cells[:, 0]  = 3
         cells[:, 1:] = faces
-        cells = cells.flatten()
-        mesh = pv.PolyData(verts, cells).clean().triangulate()
+        mesh = pv.PolyData(verts, cells.ravel()).clean().triangulate()
 
         target_red = float(
-            np.clip(1.0 - target_verts / max(1, len(verts)), 0.01, 0.99)
+            np.clip(1.0 - target_faces / max(1, len(faces)), 0.01, 0.99)
         )
-        remeshed = mesh.decimate(target_red, volume_preservation=True)
-        remeshed = remeshed.smooth(n_iter=30, relaxation_factor=0.1)
+        if pro:
+            out = mesh.decimate_pro(target_red, preserve_topology=True)
+        else:
+            out = mesh.decimate(target_red, volume_preservation=True)
 
-        f_np = remeshed.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
-        return np.asarray(remeshed.points, dtype=np.float64), f_np
+        f_np = out.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        if len(f_np) == 0:
+            return None
+        return np.asarray(out.points, dtype=np.float64), f_np
     except Exception:
         return None
 
