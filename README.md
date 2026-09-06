@@ -71,10 +71,15 @@ Bunny/Dragon/Armadillo, Utah Teapot, Cow ako ima internet.
 
 ## 3ds Max integracija
 
-**Status:** planirano. `core/converter.py` sadrži pomoćne funkcije
-(`export_from_max`, `export_from_max_headless`) i `core/max_finder.py`
-detektuje instalaciju, ali MaxScript export skript i UI dugme još nisu
-priključeni. Trenutno aplikacija radi samo sa ASCII `.txt` ulazom.
+Dugme *Učitaj .max fajl* pokreće 3ds Max headless preko
+`core/export_ascii.ms` i učitava rezultat. Ako Max nije pronađen na sistemu,
+dugme se ne prikazuje.
+
+`core/export_ascii.ms` može i samostalno, iz Max-a: pokrenut bez promenljivih
+`MAX_INPUT`/`MAX_OUTPUT` exportuje trenutnu scenu uz save dijalog.
+
+> Napisano bez pristupa 3ds Max-u i još nije pokrenuto ni jednom — treba
+> probati pre predaje.
 
 ## Metode decimacije
 

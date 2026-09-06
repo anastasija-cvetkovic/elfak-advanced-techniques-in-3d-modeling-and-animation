@@ -86,8 +86,14 @@ def export_from_max_headless(
         MAX_INPUT  — putanja do .max fajla
         MAX_OUTPUT — putanja gde se čuva ASCII rezultat
     """
-    if not os.path.exists(max_exe):
+    if not max_exe or not os.path.exists(max_exe):
         raise FileNotFoundError(f"3ds Max nije pronađen: {max_exe}")
+    # Ova provera je nedostajala, pa je nepostojeći core/export_ascii.ms
+    # umesto jasne greške davao zbunjujući "Max završio ali fajl nije kreiran".
+    if not os.path.exists(ms_script):
+        raise FileNotFoundError(f"MaxScript nije pronađen: {ms_script}")
+    if not os.path.exists(input_max):
+        raise FileNotFoundError(f"Ulazni .max fajl ne postoji: {input_max}")
 
     env = os.environ.copy()
     env["MAX_INPUT"]  = str(input_max)
