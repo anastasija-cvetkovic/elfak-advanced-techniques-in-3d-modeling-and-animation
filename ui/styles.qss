@@ -58,12 +58,13 @@ QFrame#fileZone[state="loading"] {
 }
 
 QFrame#fileZone[state="loaded"] {
-    border: 1px solid #2e3140;
-    background: #252830;
+    border: 1.5px dashed #3a3e52;
+    background: #1e2130;
 }
 
 QFrame#fileZone[state="loaded"]:hover {
-    border-color: #3a3e52;
+    border-color: #4a5080;
+    background: #22263a;
 }
 
 QFrame#fileZone[dragActive="true"] {

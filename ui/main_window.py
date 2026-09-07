@@ -194,7 +194,7 @@ class FileZone(QFrame):
         host.setStyleSheet("background:transparent;")
         host.setFixedHeight(self.STACK_H)
         self._stack = QStackedLayout(host)
-        self._stack.setContentsMargins(12, 10, 12, 10)
+        self._stack.setContentsMargins(0, 0, 0, 0)
         self._stack.addWidget(self._build_empty())     # 0
         self._stack.addWidget(self._build_loading())   # 1
         self._stack.addWidget(self._build_loaded())    # 2
@@ -239,7 +239,7 @@ class FileZone(QFrame):
     def _build_empty(self):
         w = QWidget(); w.setStyleSheet("background:transparent;")
         lv = QVBoxLayout(w)
-        lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(3)
+        lv.setContentsMargins(14, 12, 14, 12); lv.setSpacing(3)
         lv.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         for text, css in (
@@ -256,7 +256,7 @@ class FileZone(QFrame):
     def _build_loading(self):
         w = QWidget(); w.setStyleSheet("background:transparent;")
         lv = QVBoxLayout(w)
-        lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(7)
+        lv.setContentsMargins(14, 12, 14, 12); lv.setSpacing(7)
         lv.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # Red ikonica + ime je sopstveni widget (a ne layout sa stretch-evima)
@@ -293,7 +293,7 @@ class FileZone(QFrame):
     def _build_loaded(self):
         w = QWidget(); w.setStyleSheet("background:transparent;")
         lv = QVBoxLayout(w)
-        lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(8)
+        lv.setContentsMargins(14, 12, 14, 12); lv.setSpacing(8)
         lv.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         row = QHBoxLayout(); row.setSpacing(8)
@@ -306,22 +306,18 @@ class FileZone(QFrame):
         self._done_meta = QLabel("—")
         self._done_meta.setStyleSheet("font-size:11px; color:#8892a8; background:transparent;")
         info.addWidget(self._done_name); info.addWidget(self._done_meta)
-        row.addStretch()
         row.addWidget(icon); row.addLayout(info)
         row.addStretch()
         lv.addLayout(row)
 
-        # Vidljiva meta za klik. Cela zona i dalje reaguje na klik, ali bez
-        # dugmeta se to ne vidi — a sitan tekst se ne čita.
         actions = QHBoxLayout(); actions.setSpacing(7)
-        btn = QPushButton("Izaberi drugi")
+        btn = QPushButton("Izaberi drugi fajl")
         btn.setObjectName("btnPickAnother")
         btn.setFixedHeight(24)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.clicked.connect(self.browse_requested.emit)
         hint = QLabel("ili prevuci ovde")
         hint.setStyleSheet("font-size:11px; color:#5a5f70; background:transparent;")
-        actions.addStretch()
         actions.addWidget(btn); actions.addWidget(hint)
         actions.addStretch()
         lv.addLayout(actions)
