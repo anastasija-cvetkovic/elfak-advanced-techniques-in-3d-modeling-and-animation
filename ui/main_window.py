@@ -30,11 +30,21 @@ from ui.viewer_widget import MeshViewer
 
 
 # ── Pozadinski threadovi ─────────────────────────────────────────────────────
+#
+# Svi workeri emituju `done`, a ne `finished`. `finished` je ime koje QThread
+# već koristi za svoj signal "thread je izašao"; pyqtSignal sa tim imenom ga u
+# podklasi zaklanja, pa se na pravi QThread.finished više nije moglo vezati —
+# a upravo on je jedini bezbedan trenutak da se referenca na worker ispusti.
+# Bez toga se `self.worker = None` izvršavalo iz handlera signala emitovanog na
+# kraju run(), dok thread još nije izašao: brisanje QThread objekta u tom
+# trenutku je "QThread: Destroyed while thread is still running" i pad procesa.
+# Vidi MainWindow._reap_worker.
+
 
 class LoadWorker(QThread):
     """Učitava ASCII mesh fajl u pozadini da UI ne bi zamrzao."""
-    finished = pyqtSignal(float)   # elapsed sekunde
-    error    = pyqtSignal(str)
+    done  = pyqtSignal(float)   # elapsed sekunde
+    error = pyqtSignal(str)
 
     def __init__(self, model, path):
         super().__init__()
@@ -45,15 +55,15 @@ class LoadWorker(QThread):
         t0 = time.perf_counter()
         try:
             self.model.load(self.path)
-            self.finished.emit(time.perf_counter() - t0)
+            self.done.emit(time.perf_counter() - t0)
         except Exception as e:
             self.error.emit(str(e))
 
 
 class MaxConvertWorker(QThread):
     """Konvertuje .max → ASCII u pozadini koristeći 3ds Max headless."""
-    finished = pyqtSignal(str)   # putanja do generisanog .txt
-    error    = pyqtSignal(str)
+    done  = pyqtSignal(str)   # putanja do generisanog .txt
+    error = pyqtSignal(str)
 
     def __init__(self, max_exe, ms_script, input_max, output_txt):
         super().__init__()
@@ -72,14 +82,14 @@ class MaxConvertWorker(QThread):
                 self.max_exe, self.ms_script,
                 self.input_max, self.output_txt,
             )
-            self.finished.emit(self.output_txt)
+            self.done.emit(self.output_txt)
         except Exception as e:
             self.error.emit(str(e))
 
 
 class DecimateWorker(QThread):
-    finished = pyqtSignal(float)
-    error    = pyqtSignal(str)
+    done  = pyqtSignal(float)
+    error = pyqtSignal(str)
 
     def __init__(self, model, ratio, method):
         super().__init__()
@@ -89,7 +99,7 @@ class DecimateWorker(QThread):
         t0 = time.perf_counter()
         try:
             self.model.run_decimate(self.ratio, self.method)
-            self.finished.emit(time.perf_counter() - t0)
+            self.done.emit(time.perf_counter() - t0)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -168,6 +178,8 @@ class FileZone(QFrame):
 
     STACK_H  = 104   # visina dela koji se menja; podnožje dolazi ispod
     NAME_MAX = 200   # px pre elidiranja imena fajla
+    BAR_MIN  = 120   # najmanja širina trake za učitavanje
+    BAR_PAD  = 24    # margina do ivica zone koju traka nikad ne prelazi
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -247,16 +259,19 @@ class FileZone(QFrame):
         lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(7)
         lv.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        row = QHBoxLayout(); row.setSpacing(8)
+        # Red ikonica + ime je sopstveni widget (a ne layout sa stretch-evima)
+        # da bi mu se moglo pročitati sizeHint — po njemu se meri traka ispod.
+        self._load_head = QWidget()
+        self._load_head.setStyleSheet("background:transparent;")
+        row = QHBoxLayout(self._load_head)
+        row.setContentsMargins(0, 0, 0, 0); row.setSpacing(8)
         self._load_icon = QLabel("⏳")
         self._load_icon.setStyleSheet("font-size:16px; background:transparent;")
         self._load_name = QLabel("—")
         self._load_name.setStyleSheet(
             "font-size:12px; font-weight:500; color:#fff; background:transparent;")
-        row.addStretch()
         row.addWidget(self._load_icon); row.addWidget(self._load_name)
-        row.addStretch()
-        lv.addLayout(row)
+        lv.addWidget(self._load_head, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._load_meta = QLabel("—")
         self._load_meta.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -265,8 +280,14 @@ class FileZone(QFrame):
 
         # Progres stoji uz fajl koji se učitava, a ne dole kod dugmeta za
         # decimaciju — feedback treba da bude tamo gde se akcija desila.
+        # Traka se ne razvlači celom širinom okvira: širina joj se u
+        # set_loading() postavlja na širinu teksta iznad, pa je centrirana.
         self._load_bar = SweepBar()
-        lv.addWidget(self._load_bar)
+        bar_row = QHBoxLayout(); bar_row.setContentsMargins(0, 0, 0, 0)
+        bar_row.addStretch()
+        bar_row.addWidget(self._load_bar)
+        bar_row.addStretch()
+        lv.addLayout(bar_row)
         return w
 
     def _build_loaded(self):
@@ -321,6 +342,17 @@ class FileZone(QFrame):
         return QFontMetrics(self.font()).elidedText(
             name, Qt.TextElideMode.ElideMiddle, self.NAME_MAX)
 
+    def _bar_width(self) -> int:
+        """Širina trake za učitavanje — po najširem redu teksta iznad nje.
+
+        Ime fajla je elidirano na NAME_MAX pa je gornja granica poznata, a
+        donja postoji da traka ostane čitljiva i za kratka imena.
+        """
+        content = max(self._load_head.sizeHint().width(),
+                      self._load_meta.sizeHint().width())
+        avail = self.width() - 2 * self.BAR_PAD
+        return max(self.BAR_MIN, min(content, avail if avail > 0 else content))
+
     def set_empty(self):
         self._load_bar.stop()
         self._stack.setCurrentIndex(0)
@@ -330,6 +362,7 @@ class FileZone(QFrame):
         self._load_name.setText(self._elide(name))
         self._load_name.setToolTip(name)
         self._load_meta.setText(meta)
+        self._load_bar.setFixedWidth(self._bar_width())
         self._stack.setCurrentIndex(1)
         self._set_state("loading")
         self._load_bar.start()
@@ -684,6 +717,21 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.status.showMessage("Spreman")
 
+    # ── Životni ciklus workera ────────────────────────────────────────
+    def _reap_worker(self, attr: str):
+        """Ispušta referencu na worker tek kad thread stvarno izađe.
+
+        Vezuje se na QThread.finished (ne na naš `done`), jer se `done`
+        emituje iz run() dok je thread još živ. Brisanje QThread objekta u tom
+        trenutku ubija proces — a to je bilo lako pogoditi na velikim
+        meshevima, gde handler posle `done` radi sekundu-dve na renderu.
+        """
+        w = getattr(self, attr, None)
+        setattr(self, attr, None)
+        if w is not None:
+            w.deleteLater()
+        self._refresh()
+
     # ── Refresh ───────────────────────────────────────────────────────
     def _refresh(self):
         loaded    = self.model.is_loaded()
@@ -762,13 +810,13 @@ class MainWindow(QMainWindow):
         self._pending_path = path
 
         self.load_worker = LoadWorker(self.model, path)
-        self.load_worker.finished.connect(self._on_load_done)
+        self.load_worker.done.connect(self._on_load_done)
         self.load_worker.error.connect(self._on_load_error)
+        self.load_worker.finished.connect(lambda: self._reap_worker("load_worker"))
         self.load_worker.start()
         self._refresh()
 
     def _on_load_done(self, elapsed: float):
-        self.load_worker = None
         path = getattr(self, "_pending_path", "")
         self.settings.setValue("last_dir", str(Path(path).parent))
         name = Path(path).name
@@ -795,7 +843,6 @@ class MainWindow(QMainWindow):
         )
 
     def _on_load_error(self, msg: str):
-        self.load_worker = None
         self._restore_zone()
         self._refresh()
         self.status.showMessage(f"Greška pri učitavanju: {msg}")
@@ -856,19 +903,18 @@ class MainWindow(QMainWindow):
         self.status.showMessage(f"Konverzija .max → ASCII: {_Path(path).name}…")
 
         self.max_worker = MaxConvertWorker(self.max_exe, ms_script, path, out_txt)
-        self.max_worker.finished.connect(self._on_max_done)
+        self.max_worker.done.connect(self._on_max_done)
         self.max_worker.error.connect(self._on_max_error)
+        self.max_worker.finished.connect(lambda: self._reap_worker("max_worker"))
         self.max_worker.start()
         self._refresh()
 
     def _on_max_done(self, txt_path: str):
-        self.max_worker = None
         self.btn_load_max.setEnabled(True)
         self.status.showMessage("Konverzija završena — učitavam mesh…")
         self._load_file(txt_path)
 
     def _on_max_error(self, msg: str):
-        self.max_worker = None
         self.btn_load_max.setEnabled(True)
         self._restore_zone()
         self._refresh()
@@ -888,12 +934,12 @@ class MainWindow(QMainWindow):
         self.btn_convert.setEnabled(False)
         self.status.showMessage(f"Konverzija u toku ({pct}% smanjenje, {method})...")
         self.worker = DecimateWorker(self.model, ratio, method)
-        self.worker.finished.connect(self._on_done)
+        self.worker.done.connect(self._on_done)
         self.worker.error.connect(self._on_error)
+        self.worker.finished.connect(lambda: self._reap_worker("worker"))
         self.worker.start()
 
     def _on_done(self, elapsed: float):
-        self.worker = None
         self.progress.stop()
         self.viewer.show_decimated(self.model.decimated_verts,
                                    self.model.decimated_faces)
@@ -906,7 +952,6 @@ class MainWindow(QMainWindow):
             f"{s.verts:,} tačaka / {s.faces:,} trouglova  (−{s.reduction_f}%){err_str}")
 
     def _on_error(self, msg: str):
-        self.worker = None
         self.progress.stop()
         self._refresh()
         self.status.showMessage(f"Greška: {msg}")
@@ -966,5 +1011,13 @@ class MainWindow(QMainWindow):
             "✕  Izađi" if self._fullscreen_viewer else "⤢  Ceo ekran")
 
     def closeEvent(self, event):
+        # Ako se app zatvori dok worker radi, interpreter bi rušio QThread koji
+        # je još u run() — isti pad kao kod ranog ispuštanja reference. Čekamo
+        # ga, ograničeno, da zatvaranje ne visi ako se posao zaglavi.
+        for attr in ("worker", "load_worker", "max_worker"):
+            w = getattr(self, attr, None)
+            if w is not None and w.isRunning():
+                self.status.showMessage("Čekam da se posao u pozadini završi…")
+                w.wait(5000)
         self.viewer.close()
         super().closeEvent(event)

@@ -12,7 +12,7 @@ from typing import Optional
 import numpy as np
 
 from core.converter import load_mesh, save_mesh
-from core.decimator import decimate
+from core.decimate_proc import decimate_auto
 
 
 @dataclass
@@ -75,6 +75,10 @@ class MeshModel:
         Na kraju keš-ira Hausdorff grešku (i sav taj račun ostaje u istom
         worker thread-u — main thread ostaje slobodan).
         Može se pozivati više puta sa različitim parametrima.
+
+        Sam račun ide kroz `decimate_auto`, koji velike mesheve šalje u
+        odvojen proces — inače native biblioteke drže GIL i zamrznu UI, vidi
+        core/decimate_proc.py.
         """
         if not self.is_loaded():
             raise RuntimeError("Mesh nije učitan.")
@@ -83,7 +87,7 @@ class MeshModel:
         self.last_method = method
         self._shape_error = None  # invalidate keš pre novog računa
 
-        v, f = decimate(
+        v, f = decimate_auto(
             self.original_verts,
             self.original_faces,
             ratio,

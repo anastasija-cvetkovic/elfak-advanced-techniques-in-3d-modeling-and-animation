@@ -4,6 +4,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# faulthandler izlaz (main.py) — po masini, ne ide u repo
+crash.log
+
 # Generisani mesh primeri (regenerisi sa: python generate_examples.py)
 DRAGON.txt
 ARMADILLO.txt
