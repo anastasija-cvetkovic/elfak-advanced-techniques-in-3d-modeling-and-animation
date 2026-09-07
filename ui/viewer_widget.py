@@ -84,7 +84,7 @@ class MeshViewer(QWidget):
     def _build_ui(self):
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(2)
+        root.setSpacing(0)
 
         if PYVISTA_OK:
             left = QWidget(self)
@@ -105,7 +105,8 @@ class MeshViewer(QWidget):
 
             sep = QFrame(self)
             sep.setFrameShape(QFrame.Shape.VLine)
-            sep.setStyleSheet("color: #333;")
+            sep.setFixedWidth(1)
+            sep.setStyleSheet("background:#2e3140; border:none;")
 
             root.addWidget(left)
             root.addWidget(sep)

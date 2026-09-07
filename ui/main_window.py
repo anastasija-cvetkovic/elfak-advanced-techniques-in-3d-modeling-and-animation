@@ -314,7 +314,7 @@ class FileZone(QFrame):
         # Vidljiva meta za klik. Cela zona i dalje reaguje na klik, ali bez
         # dugmeta se to ne vidi — a sitan tekst se ne čita.
         actions = QHBoxLayout(); actions.setSpacing(7)
-        btn = QPushButton("Izaberi drugi…")
+        btn = QPushButton("Izaberi drugi")
         btn.setObjectName("btnPickAnother")
         btn.setFixedHeight(24)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -423,39 +423,6 @@ def _section_label(text: str, parent=None):
     return l
 
 
-class StatBlock(QWidget):
-    """Blok statistike: mala labela gore, velika vrednost dole + tag promene."""
-    def __init__(self, label: str, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("background: transparent;")
-        lv = QVBoxLayout(self)
-        lv.setContentsMargins(0, 0, 0, 0)
-        lv.setSpacing(2)
-
-        self._lbl = QLabel(label)
-        self._lbl.setStyleSheet(
-            "font-size:10px; color:#555; letter-spacing:1px; "
-            "background:transparent; font-weight:500;")
-
-        row = QHBoxLayout(); row.setSpacing(6)
-        self._val = QLabel("—")
-        self._val.setStyleSheet(
-            "font-size:20px; font-weight:500; color:#e0e0e0; background:transparent;")
-        self._tag = QLabel("")
-        self._tag.setStyleSheet(
-            "font-size:11px; color:#4caf82; background:transparent;")
-        self._sub = QLabel("")
-        self._sub.setStyleSheet(
-            "font-size:10px; color:#555; background:transparent;")
-        row.addWidget(self._val); row.addWidget(self._tag)
-        row.addWidget(self._sub); row.addStretch()
-
-        lv.addWidget(self._lbl); lv.addLayout(row)
-
-    def set_value(self, val, tag="", sub=""):
-        self._val.setText(str(val) if val is not None else "—")
-        self._tag.setText(tag)
-        self._sub.setText(sub)
 
 
 # ── Glavni prozor ─────────────────────────────────────────────────────────────
@@ -695,21 +662,93 @@ class MainWindow(QMainWindow):
     def _build_stats_bar(self):
         bar = QWidget()
         bar.setObjectName("statsBar")
-        bar.setFixedHeight(70)
+        bar.setFixedHeight(76)
         bar.setStyleSheet(
             "QWidget#statsBar { background:#1a1c23; border-top:1px solid #2e3140; }"
         )
         hv = QHBoxLayout(bar)
-        hv.setContentsMargins(20, 8, 20, 8); hv.setSpacing(24)
+        hv.setContentsMargins(0, 0, 0, 0)
+        hv.setSpacing(0)
 
-        self.s_orig  = StatBlock("ORIGINALNE TAČKE")
-        self.s_after = StatBlock("NAKON OPTIMIZACIJE")
-        self.s_tris  = StatBlock("TROUGLOVI")
-        self.s_err   = StatBlock("GREŠKA OBLIKA")
+        def vsep():
+            f = QFrame()
+            f.setFixedWidth(1)
+            f.setStyleSheet("background:#2e3140; border:none;")
+            return f
 
-        for s in (self.s_orig, self.s_after, self.s_tris, self.s_err):
-            hv.addWidget(s, stretch=1)
+        orig, self._orig_tacke, self._orig_trouglovi = self._stat_group("ORIGINALNO")
+        opt,  self._opt_tacke,  self._opt_trouglovi  = self._stat_group("OPTIMIZOVANO")
+
+        # Desna polovina = OPTIMIZOVANO + GREŠKA u jednom kontejneru stretch=1,
+        # da linija između leve i desne polovine odgovara liniji u 3D prikazu.
+        right = QWidget(); right.setStyleSheet("background:transparent;")
+        rh = QHBoxLayout(right); rh.setContentsMargins(0, 0, 0, 0); rh.setSpacing(0)
+        rh.addWidget(opt, stretch=1)
+        rh.addWidget(vsep())
+        rh.addWidget(self._stat_err_group())
+
+        hv.addWidget(orig, stretch=1)
+        hv.addWidget(vsep())
+        hv.addWidget(right, stretch=1)
         return bar
+
+    def _stat_group(self, title: str):
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        lv = QVBoxLayout(w)
+        lv.setContentsMargins(18, 8, 18, 8)
+        lv.setSpacing(4)
+
+        ttl = QLabel(title)
+        ttl.setStyleSheet(
+            "font-size:9px; font-weight:500; color:#4a5080; "
+            "letter-spacing:1.5px; background:transparent;")
+        lv.addWidget(ttl)
+
+        row = QHBoxLayout()
+        row.setSpacing(20)
+        row.setContentsMargins(0, 0, 0, 0)
+
+        def cell(sub_text):
+            cw = QWidget(); cw.setStyleSheet("background:transparent;")
+            cv = QVBoxLayout(cw); cv.setContentsMargins(0, 0, 0, 0); cv.setSpacing(1)
+            sub = QLabel(sub_text)
+            sub.setStyleSheet(
+                "font-size:9px; font-weight:500; color:#444; "
+                "letter-spacing:1px; background:transparent;")
+            val = QLabel("—")
+            val.setStyleSheet(
+                "font-size:22px; font-weight:500; color:#e0e0e0; background:transparent;")
+            cv.addWidget(sub); cv.addWidget(val)
+            return cw, val
+
+        tacke_w,     val_t = cell("TAČKE")
+        trouglovi_w, val_f = cell("TROUGLOVI")
+        row.addWidget(tacke_w); row.addWidget(trouglovi_w); row.addStretch()
+        lv.addLayout(row)
+        return w, val_t, val_f
+
+    def _stat_err_group(self):
+        w = QWidget()
+        w.setFixedWidth(120)
+        w.setStyleSheet("background:transparent;")
+        lv = QVBoxLayout(w)
+        lv.setContentsMargins(0, 8, 0, 8)
+        lv.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        ttl = QLabel("GREŠKA")
+        ttl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ttl.setStyleSheet(
+            "font-size:9px; font-weight:500; color:#555; "
+            "letter-spacing:1.5px; background:transparent;")
+
+        self._err_val = QLabel("—")
+        self._err_val.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._err_val.setStyleSheet(
+            "font-size:22px; font-weight:500; color:#e0e0e0; background:transparent;")
+
+        lv.addWidget(ttl); lv.addWidget(self._err_val)
+        return w
 
     # ── Status bar ────────────────────────────────────────────────────
     def _build_statusbar(self):
@@ -748,26 +787,24 @@ class MainWindow(QMainWindow):
         s = self.model.stats_dict()
 
         if not loaded:
-            for blk in (self.s_orig, self.s_after, self.s_tris, self.s_err):
-                blk.set_value(None)
+            self._orig_tacke.setText("—"); self._orig_trouglovi.setText("—")
+            self._opt_tacke.setText("—");  self._opt_trouglovi.setText("—")
+            self._err_val.setText("—")
             return
 
         ov = s['orig_verts']; of = s['orig_faces']
-        self.s_orig.set_value(f"{ov:,}" if ov else "—")
+        self._orig_tacke.setText(f"{ov:,}" if ov else "—")
+        self._orig_trouglovi.setText(f"{of:,}" if of else "—")
 
         if decimated:
             dv = s['dec_verts']; df = s['dec_faces']
-            rv = s['reduction_v']
-            self.s_after.set_value(f"{dv:,}" if dv else "—",
-                                   tag=f"−{rv}%" if dv else "")
-            self.s_tris.set_value(f"{df:,}" if df else "—",
-                                  sub=f"orig: {of:,}" if of else "")
+            self._opt_tacke.setText(f"{dv:,}" if dv else "—")
+            self._opt_trouglovi.setText(f"{df:,}" if df else "—")
             err = self.model.shape_error_pct()
-            self.s_err.set_value(f"{err}%" if err is not None else "—")
+            self._err_val.setText(f"{err}%" if err is not None else "—")
         else:
-            self.s_after.set_value("—")
-            self.s_tris.set_value(f"{of:,}" if of else "—")
-            self.s_err.set_value("—")
+            self._opt_tacke.setText("—"); self._opt_trouglovi.setText("—")
+            self._err_val.setText("—")
 
     # ── Slajder ──────────────────────────────────────────────────────
     def _on_slider_changed(self, v: int):
