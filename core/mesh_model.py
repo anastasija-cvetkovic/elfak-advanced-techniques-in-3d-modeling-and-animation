@@ -1,8 +1,4 @@
-"""
-core/mesh_model.py
-Centralno stanje aplikacije — drži originalni i decimirani mesh,
-orchestrira konverziju i decimaciju.
-"""
+"""Centralno stanje aplikacije — originalni i decimirani mesh, statistike."""
 
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -24,19 +20,7 @@ class MeshStats:
 
 
 class MeshModel:
-    """
-    Drži stanje mesheva i orkhestrira operacije nad njima.
-
-    Atributi
-    --------
-    source_path     — putanja odakle je učitan mesh
-    original_verts  — originalne tačke
-    original_faces  — originalni trouglovi
-    decimated_verts — tačke nakon decimacije (None ako nije urađena)
-    decimated_faces — trouglovi nakon decimacije
-    last_ratio      — poslednje korišćen ratio
-    last_method     — poslednje korišćena metoda
-    """
+    """Drži mesheve i orkestrira operacije nad njima."""
 
     def __init__(self) -> None:
         self.source_path:     Optional[str]        = None
@@ -51,10 +35,7 @@ class MeshModel:
     # ── Učitavanje ────────────────────────────────────────────────────────────
 
     def load(self, path: str) -> None:
-        """
-        Učitava ASCII mesh fajl.
-        Resetuje prethodni decimirani rezultat i keš greške.
-        """
+        """Učitava ASCII mesh fajl i resetuje prethodni rezultat decimacije."""
         verts, faces = load_mesh(path)
         self.source_path     = path
         self.original_verts  = verts
@@ -70,22 +51,15 @@ class MeshModel:
 
     def run_decimate(self, ratio: float, method: str = "auto") -> None:
         """
-        Pokreće decimaciju nad originalnim mesh-om.
-        Čuva rezultat u decimated_verts / decimated_faces.
-        Na kraju keš-ira Hausdorff grešku (i sav taj račun ostaje u istom
-        worker thread-u — main thread ostaje slobodan).
-        Može se pozivati više puta sa različitim parametrima.
-
-        Sam račun ide kroz `decimate_auto`, koji velike mesheve šalje u
-        odvojen proces — inače native biblioteke drže GIL i zamrznu UI, vidi
-        core/decimate_proc.py.
+        Decimira originalni mesh i kešira grešku. Može se pozivati više puta
+        sa različitim parametrima.
         """
         if not self.is_loaded():
             raise RuntimeError("Mesh nije učitan.")
 
         self.last_ratio  = ratio
         self.last_method = method
-        self._shape_error = None  # invalidate keš pre novog računa
+        self._shape_error = None
 
         v, f = decimate_auto(
             self.original_verts,
@@ -96,8 +70,7 @@ class MeshModel:
         self.decimated_verts = v
         self.decimated_faces = f
 
-        # Precomputamo grešku u istom thread-u kao decimacija — dok worker
-        # radi svoje, UI je slobodan. shape_error_pct() posle samo čita keš.
+        # Greška se računa u istom thread-u kao decimacija, da UI ostane slobodan.
         self._shape_error = self._compute_shape_error()
 
     def has_decimated(self) -> bool:
@@ -106,11 +79,7 @@ class MeshModel:
     # ── Čuvanje ───────────────────────────────────────────────────────────────
 
     def save(self, path: str, decimated: bool = True) -> None:
-        """
-        Čuva mesh u ASCII formatu.
-        decimated=True  → čuva decimirani mesh (ako postoji)
-        decimated=False → čuva originalni mesh
-        """
+        """Čuva decimirani (ako postoji) ili originalni mesh u ASCII formatu."""
         if decimated and self.has_decimated():
             save_mesh(path, self.decimated_verts, self.decimated_faces)
         elif self.is_loaded():
@@ -143,17 +112,11 @@ class MeshModel:
         )
 
     def shape_error_pct(self) -> float | None:
-        """
-        Vraća keširanu Hausdorff grešku (%), izračunatu u run_decimate.
-        Trivijalan getter — bezbedno se poziva iz UI thread-a.
-        """
+        """Keširana greška (%) izračunata u run_decimate. Bezbedno iz UI thread-a."""
         return self._shape_error
 
     def _compute_shape_error(self) -> float | None:
-        """
-        Hausdorff distance (orig → dec) normalizovan dijagonalom bounding box-a, u %.
-        Težak račun — zove se iz worker thread-a, ne iz UI-ja.
-        """
+        """Hausdorff (orig → dec) normalizovan dijagonalom bounding box-a, u %."""
         if not self.has_decimated():
             return None
         try:
@@ -169,7 +132,6 @@ class MeshModel:
 
             try:
                 from scipy.spatial import cKDTree
-                # workers=-1 → cKDTree query koristi sva CPU jezgra paralelno
                 dists, _ = cKDTree(dec).query(sample, k=1, workers=-1)
             except ImportError:
                 dists = np.sqrt(((sample[:, None] - dec[None]) ** 2).sum(axis=2)).min(axis=1)
@@ -179,7 +141,7 @@ class MeshModel:
             return None
 
     def stats_dict(self) -> dict:
-        """Vraća sve statistike kao dict pogodan za prikaz u UI-u."""
+        """Sve statistike kao dict pogodan za prikaz u UI-u."""
         o = self.original_stats()
         d = self.decimated_stats()
         return {

@@ -39,8 +39,7 @@ QLabel#appSubtitle {
     background: transparent;
 }
 
-/* Zona za fajl — ista visina u sva tri stanja, menja se samo izgled okvira.
-   Redosled je bitan: dragActive mora biti poslednji da nadjača state-ove. */
+/* Zona za fajl — dragActive mora biti poslednji da nadjača state-ove */
 QFrame#fileZone {
     border: 1.5px dashed #3a3e52;
     border-radius: 10px;
@@ -100,8 +99,7 @@ QLabel#sectionLabel:disabled {
     color: #3a3d47;
 }
 
-/* Sekcija optimizacije — sve ima :disabled varijantu jer se cela sekcija
-   prigušuje dok fajl nije učitan. */
+/* Sekcija optimizacije — sve ima :disabled varijantu */
 QLabel#optLabel {
     font-size: 13px;
     font-weight: 500;

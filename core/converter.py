@@ -1,16 +1,4 @@
-"""
-core/converter.py
-Učitavanje i čuvanje ASCII mesh fajlova + poziv 3ds Max headless.
-
-Format:
-    n_verts
-    n_faces
-    x y z   (n_verts redova)
-    a b c   (n_faces redova, 0-based indeksi)
-
-Sav I/O radi na numpy nizovima radi brzine (10-100× brže od Python for petlji
-za velike mesh-eve).
-"""
+"""Učitavanje i čuvanje ASCII mesh fajlova + poziv 3ds Max-a."""
 
 from __future__ import annotations
 import subprocess
@@ -20,11 +8,7 @@ import numpy as np
 
 
 def load_mesh(path: str) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Čita ASCII mesh fajl i vraća:
-        verts — np.ndarray oblika (N, 3), dtype float64
-        faces — np.ndarray oblika (M, 3), dtype int32
-    """
+    """Čita ASCII mesh fajl i vraća verts (N, 3) float64 i faces (M, 3) int32."""
     with open(path, "r") as f:
         n_verts = int(f.readline())
         n_faces = int(f.readline())
@@ -41,10 +25,7 @@ def load_mesh(path: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def save_mesh(path: str, verts: np.ndarray, faces: np.ndarray) -> None:
-    """
-    Čuva mesh u ASCII formatu. Prima np.ndarray (ili bilo šta što se može
-    konvertovati u ndarray).
-    """
+    """Čuva mesh u ASCII formatu."""
     verts = np.asarray(verts, dtype=np.float64)
     faces = np.asarray(faces, dtype=np.int32)
 
@@ -56,10 +37,7 @@ def save_mesh(path: str, verts: np.ndarray, faces: np.ndarray) -> None:
 
 
 def export_from_max(max_exe: str, ms_script: str) -> None:
-    """
-    Pokreće 3ds Max sa MaxScript-om koji exportuje aktivnu scenu u ASCII.
-    Non-blocking — 3ds Max se otvara, korisnik bira gde da sačuva.
-    """
+    """Otvara 3ds Max sa MaxScript-om koji exportuje aktivnu scenu. Non-blocking."""
     if not os.path.exists(max_exe):
         raise FileNotFoundError(f"3ds Max nije pronađen: {max_exe}")
     if not os.path.exists(ms_script):
@@ -95,15 +73,10 @@ def export_from_max_gui(
     poll: float = 1.0,
 ) -> None:
     """
-    Konvertuje .max → ASCII tako što pokrene 3ds Max VIDLJIVO i pusti mu skriptu.
+    Konvertuje .max → ASCII tako što pokrene 3ds Max vidljivo i pusti mu skriptu.
 
-    Zašto ovako, a ne headless: education licence ne dozvoljavaju batch režim.
-    `3dsmaxbatch.exe` na takvoj licenci izlazi sa kodom -12 pre nego što uopšte
-    pročita skriptu — provereno i skriptom od tri reda koja samo upisuje fajl.
-    Interaktivni Max na istoj licenci radi normalno.
-
-    Skripta dobija putanje kroz MAX_INPUT / MAX_OUTPUT, sama učita scenu,
-    exportuje i zatvori Max. Ovde se samo čeka da se izlazni fajl pojavi.
+    Education licence ne dozvoljavaju batch režim, pa headless varijanta ne radi.
+    Skripta putanje dobija kroz MAX_INPUT / MAX_OUTPUT; ovde se čeka izlazni fajl.
     """
     if not max_exe or not os.path.exists(max_exe):
         raise FileNotFoundError(f"3ds Max nije pronađen: {max_exe}")
@@ -112,8 +85,6 @@ def export_from_max_gui(
     if not os.path.exists(input_max):
         raise FileNotFoundError(f"Ulazni .max fajl ne postoji: {input_max}")
 
-    # Ako Max vec radi, nova instanca preda posao postojecoj i odmah izadje —
-    # skripta se nikad ne izvrsi, a mi vidimo samo izlazni kod -12.
     if _max_is_running():
         raise RuntimeError(
             "3ds Max je već pokrenut. Zatvorite ga pa pokušajte ponovo — "
@@ -138,27 +109,23 @@ def export_from_max_gui(
 
     deadline = time.time() + timeout
     exited_at = None
-    grace = 90.0          # koliko se ceka posle izlaska pokretaca
+    grace = 90.0          # koliko se čeka posle izlaska pokretača
     while time.time() < deadline:
-        # Skripta upisuje izuzetak ovde umesto da ga baci — startup skripta
-        # koja baci izuzetak natera Max da prijavi pad instalacije.
         if os.path.exists(err_path):
             with open(err_path, "r", errors="replace") as f:
                 msg = f.read().strip()
             raise RuntimeError(f"MAXScript greška:\n{msg}")
 
         if os.path.exists(output_txt):
-            # Fajl se piše u više navrata — sačekaj da mu veličina prestane
-            # da raste pre nego što javimo da je gotov.
+            # Fajl se piše u više navrata — čekaj da mu veličina prestane da raste.
             size = -1
             while size != os.path.getsize(output_txt):
                 size = os.path.getsize(output_txt)
                 time.sleep(poll)
             return
 
-        # Pokrenuti proces nije pouzdan pokazatelj: 3dsmax.exe ume da prepusti
-        # posao drugom procesu i sam izadje. Zato se posle njegovog izlaska
-        # ceka jos malo, pa tek onda odustaje.
+        # 3dsmax.exe ume da prepusti posao drugom procesu i sam izađe, pa se
+        # posle njegovog izlaska čeka još malo.
         if proc.poll() is not None:
             if exited_at is None:
                 exited_at = time.time()
@@ -183,17 +150,12 @@ def export_from_max_headless(
     timeout: int = 120,
 ) -> None:
     """
-    Pokreće 3ds Max headless (bez prozora) i konvertuje .max → ASCII.
-    Blokira dok konverzija ne završi ili ne istekne timeout.
+    Konvertuje .max → ASCII preko headless Max-a. Blokira do kraja ili timeout-a.
 
-    Varijable okoline koje MaxScript čita:
-        MAX_INPUT  — putanja do .max fajla
-        MAX_OUTPUT — putanja gde se čuva ASCII rezultat
+    MaxScript čita putanje iz MAX_INPUT i MAX_OUTPUT.
     """
     if not max_exe or not os.path.exists(max_exe):
         raise FileNotFoundError(f"3ds Max nije pronađen: {max_exe}")
-    # Ova provera je nedostajala, pa je nepostojeći core/export_ascii.ms
-    # umesto jasne greške davao zbunjujući "Max završio ali fajl nije kreiran".
     if not os.path.exists(ms_script):
         raise FileNotFoundError(f"MaxScript nije pronađen: {ms_script}")
     if not os.path.exists(input_max):
@@ -203,9 +165,6 @@ def export_from_max_headless(
     env["MAX_INPUT"]  = str(input_max)
     env["MAX_OUTPUT"] = str(output_txt)
 
-    # 3dsmaxbatch.exe je Autodesk-ov namenski alat za headless pokretanje i
-    # jedini pouzdan način. Poziv "3dsmax.exe -q -silent -mxs ..." koji je ovde
-    # ranije stajao vraća kod -12 (4294967284) i skripta se nikad ne izvrši.
     from core.max_finder import find_batch_exe
 
     batch_exe = find_batch_exe(max_exe)
@@ -227,12 +186,7 @@ def export_from_max_headless(
     )
 
     def _log_tail(n: int = 25) -> str:
-        """
-        Poslednji deo Max-ovog log-a — bez toga je greška samo broj.
-
-        Max piše log kao UTF-16; čitanje kao UTF-8 daje tekst razmaknut
-        nulama ("0 6 / 0 9 ..."), pa se kodiranje bira po BOM-u.
-        """
+        """Poslednji deo Max-ovog log-a; kodiranje se bira po BOM-u (Max piše UTF-16)."""
         try:
             with open(log_path, "rb") as f:
                 raw = f.read()
@@ -244,7 +198,6 @@ def export_from_max_headless(
                 text = raw[2:].decode(enc, errors="replace")
                 break
         else:
-            # Bez BOM-a: puno nul-bajtova i dalje znači UTF-16.
             enc = "utf-16-le" if raw.count(b"\x00") > len(raw) // 4 else "utf-8"
             text = raw.decode(enc, errors="replace")
 

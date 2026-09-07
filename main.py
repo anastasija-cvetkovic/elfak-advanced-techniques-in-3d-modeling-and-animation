@@ -1,7 +1,4 @@
-"""
-main.py — entry point
-Pokretanje: python main.py
-"""
+"""Entry point. Pokretanje: python main.py"""
 
 import faulthandler
 import sys
@@ -13,10 +10,8 @@ from PyQt6.QtCore import Qt
 
 from ui.main_window import MainWindow
 
-# Padovi u native kodu (VTK/OpenGL, decimacione biblioteke) ne prolaze kroz
-# Python izuzetke — proces samo nestane, bez traga. faulthandler upisuje C
-# stack u crash.log, pa se posle pada vidi u kojoj biblioteci je puklo.
-# Fajl mora da ostane otvoren dok proces živi, zato modul-level referenca.
+# Padovi u native kodu (VTK/OpenGL) ne prolaze kroz Python izuzetke, pa
+# faulthandler upisuje C stack u crash.log. Fajl ostaje otvoren dok proces živi.
 _CRASH_LOG = open(Path(__file__).parent / "crash.log", "a", buffering=1)
 _CRASH_LOG.write(f"\n=== pokretanje {datetime.now():%Y-%m-%d %H:%M:%S} ===\n")
 faulthandler.enable(file=_CRASH_LOG, all_threads=True)

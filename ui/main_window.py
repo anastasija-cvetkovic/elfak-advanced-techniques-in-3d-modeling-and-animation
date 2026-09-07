@@ -1,10 +1,8 @@
 """
-ui/main_window.py
-Layout identičan screenshotu:
-  - Tamna tema
-  - Levo: zona za fajl (drag&drop, tri stanja), slider, metoda, prikaz, dugmad
-  - Desno: 3D prikaz sa toolbar-om (Orbita / Ceo ekran)
-  - Desno dole: statistike (Originalne tačke, Nakon optimizacije, Trouglovi, Greška)
+Glavni prozor.
+
+Levo: zona za fajl (drag&drop, tri stanja), slajder, metoda, prikaz, dugmad.
+Desno: 3D prikaz sa toolbar-om i traka sa statistikama.
 """
 
 from __future__ import annotations
@@ -31,14 +29,8 @@ from ui.viewer_widget import MeshViewer
 
 # ── Pozadinski threadovi ─────────────────────────────────────────────────────
 #
-# Svi workeri emituju `done`, a ne `finished`. `finished` je ime koje QThread
-# već koristi za svoj signal "thread je izašao"; pyqtSignal sa tim imenom ga u
-# podklasi zaklanja, pa se na pravi QThread.finished više nije moglo vezati —
-# a upravo on je jedini bezbedan trenutak da se referenca na worker ispusti.
-# Bez toga se `self.worker = None` izvršavalo iz handlera signala emitovanog na
-# kraju run(), dok thread još nije izašao: brisanje QThread objekta u tom
-# trenutku je "QThread: Destroyed while thread is still running" i pad procesa.
-# Vidi MainWindow._reap_worker.
+# Workeri emituju `done`, a ne `finished` — `finished` je QThread-ov signal
+# "thread je izašao" i jedini bezbedan trenutak za ispuštanje reference.
 
 
 class LoadWorker(QThread):
@@ -74,9 +66,7 @@ class MaxConvertWorker(QThread):
 
     def run(self):
         try:
-            # Vidljivi Max, ne headless: education licence ne dozvoljavaju
-            # batch režim (3dsmaxbatch.exe izlazi sa -12 pre nego što uopšte
-            # pročita skriptu). Interaktivni Max na istoj licenci radi.
+            # Vidljivi Max, ne headless — education licence odbijaju batch režim.
             from core.converter import export_from_max_gui
             export_from_max_gui(
                 self.max_exe, self.ms_script,
@@ -158,19 +148,10 @@ class SweepBar(QWidget):
 # ── Zona za fajl: jedna, fiksne visine, tri stanja ───────────────────────────
 
 class FileZone(QFrame):
-    """Prazno → učitavanje → učitano, sve u istom okviru fiksne visine.
-
-    Ranije su ovo bila dva odvojena widgeta (upload zona + fajl kartica) koja su
-    se međusobno sakrivala. Zona je 110px, kartica 46px — pa je pri svakom
-    učitavanju cela leva kolona skakala ~140px, i još jednom nazad pri zameni
-    fajla. Sada se menja samo sadržaj okvira; ništa ispod se ne pomera.
-
-    Ispod separatora je stalno podnožje sa .max dugmetom — i to je "učitaj
-    fajl" akcija, pa nema razloga da stoji izvan okvira. Podnožje je isto u
-    sva tri stanja; menja se samo deo iznad njega.
-
-    Drop i klik rade u svim stanjima osim tokom učitavanja — zamena fajla ne
-    traži nikakav prethodni korak.
+    """
+    Prazno → učitavanje → učitano, sve u istom okviru fiksne visine, sa
+    stalnim podnožjem za .max. Drop i klik rade u svim stanjima osim tokom
+    učitavanja.
     """
 
     file_dropped     = pyqtSignal(str)   # putanja prevučenog fajla
@@ -213,8 +194,7 @@ class FileZone(QFrame):
         """Stalno podnožje: .max dugme + verzija Maxa. Isto u svim stanjima."""
         w = QWidget()
         w.setStyleSheet("background:transparent;")
-        # Klik na praznu površinu podnožja ne sme da otvori .txt dijalog —
-        # bez ovoga bi propao do FileZone.mousePressEvent.
+        # Klik na podnožje ne sme da propadne do FileZone.mousePressEvent.
         w.mousePressEvent = lambda e: None
         w.setCursor(Qt.CursorShape.ArrowCursor)
 
@@ -259,8 +239,8 @@ class FileZone(QFrame):
         lv.setContentsMargins(14, 12, 14, 12); lv.setSpacing(7)
         lv.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        # Red ikonica + ime je sopstveni widget (a ne layout sa stretch-evima)
-        # da bi mu se moglo pročitati sizeHint — po njemu se meri traka ispod.
+        # Sopstveni widget, da mu se može pročitati sizeHint — po njemu se
+        # meri širina trake ispod.
         self._load_head = QWidget()
         self._load_head.setStyleSheet("background:transparent;")
         row = QHBoxLayout(self._load_head)
@@ -278,10 +258,7 @@ class FileZone(QFrame):
         self._load_meta.setStyleSheet("font-size:11px; color:#8892a8; background:transparent;")
         lv.addWidget(self._load_meta)
 
-        # Progres stoji uz fajl koji se učitava, a ne dole kod dugmeta za
-        # decimaciju — feedback treba da bude tamo gde se akcija desila.
-        # Traka se ne razvlači celom širinom okvira: širina joj se u
-        # set_loading() postavlja na širinu teksta iznad, pa je centrirana.
+        # Širina trake se postavlja u set_loading(), po tekstu iznad nje.
         self._load_bar = SweepBar()
         bar_row = QHBoxLayout(); bar_row.setContentsMargins(0, 0, 0, 0)
         bar_row.addStretch()
@@ -339,11 +316,7 @@ class FileZone(QFrame):
             name, Qt.TextElideMode.ElideMiddle, self.NAME_MAX)
 
     def _bar_width(self) -> int:
-        """Širina trake za učitavanje — po najširem redu teksta iznad nje.
-
-        Ime fajla je elidirano na NAME_MAX pa je gornja granica poznata, a
-        donja postoji da traka ostane čitljiva i za kratka imena.
-        """
+        """Širina trake za učitavanje — po najširem redu teksta iznad nje."""
         content = max(self._load_head.sizeHint().width(),
                       self._load_meta.sizeHint().width())
         avail = self.width() - 2 * self.BAR_PAD
@@ -487,10 +460,7 @@ class MainWindow(QMainWindow):
         sv.addStretch()
         sv.addWidget(self._section_buttons())
 
-        # Sekcijama treba ~640px, a panel ih na 700px prozoru dobije manje —
-        # bez scroll area Qt ih stisne ispod minimuma i widgeti se preklope
-        # (dugme za .max je ulazilo u zonu za fajl). Sa scroll-om svaka sekcija
-        # dobija punu visinu, a višak se skroluje.
+        # Bez scroll area Qt stisne sekcije ispod minimuma i widgeti se preklope.
         scroll = QScrollArea()
         scroll.setWidget(content)
         scroll.setWidgetResizable(True)
@@ -513,14 +483,11 @@ class MainWindow(QMainWindow):
         self.file_zone.browse_requested.connect(self._on_browse)
         lv.addWidget(self.file_zone)
 
-        # .max kontrole žive u podnožju zone; ovde ih samo ožičimo. Dugme je
-        # UVEK vidljivo — ranije se sakrivalo kad Max nije pronađen, pa je
-        # izgledalo kao da funkcionalnost ne postoji, bez traga zašto.
+        # .max kontrole žive u podnožju zone; ovde se samo ožičuju. Dugme i
+        # labela su uvek vidljivi, i kad Max nije pronađen.
         self.btn_load_max = self.file_zone.btn_max
         self.btn_load_max.clicked.connect(self._on_load_max)
 
-        # Labela uvek zauzima svoju visinu — i kad Max nije nađen. Sakrivanje
-        # bi pomerilo sve ispod nje.
         self.lbl_max_path = self.file_zone.lbl_max
         self.lbl_max_path.mousePressEvent = lambda e: self._pick_max_exe()
 
@@ -532,8 +499,7 @@ class MainWindow(QMainWindow):
         lv = QVBoxLayout(w); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(10)
         lv.addWidget(_section_label("OPTIMIZACIJA MREŽE"))
 
-        # Stilovi ovih labela žive u styles.qss (a ne inline) da bi imali i
-        # :disabled varijantu — cela sekcija se prigušuje dok nema fajla.
+        # Stilovi ovih labela su u styles.qss radi :disabled varijante.
         row = QHBoxLayout()
         lbl = QLabel("Jačina smanjenja")
         lbl.setObjectName("optLabel")
@@ -596,8 +562,7 @@ class MainWindow(QMainWindow):
         self.btn_convert.clicked.connect(self._on_decimate)
         lv.addWidget(self.btn_convert)
 
-        # Traka drži svoje mesto i kad je nevidljiva (da dugmad ne skaču), ali
-        # je razmak bio 34px ukupno — previše za 6px traku. Sada 22px.
+        # Traka drži svoje mesto i kad je nevidljiva, da dugmad ne skaču.
         prog_wrap = QWidget(); prog_wrap.setFixedHeight(10)
         prog_wl = QVBoxLayout(prog_wrap)
         prog_wl.setContentsMargins(0, 2, 0, 2)
@@ -675,8 +640,8 @@ class MainWindow(QMainWindow):
         orig, self._orig_tacke, self._orig_trouglovi = self._stat_group("ORIGINALNO")
         opt,  self._opt_tacke,  self._opt_trouglovi  = self._stat_group("OPTIMIZOVANO")
 
-        # Desna polovina = OPTIMIZOVANO + GREŠKA u jednom kontejneru stretch=1,
-        # da linija između leve i desne polovine odgovara liniji u 3D prikazu.
+        # OPTIMIZOVANO + GREŠKA u jednom kontejneru, da se linija između
+        # polovina poklopi sa linijom u 3D prikazu.
         right = QWidget(); right.setStyleSheet("background:transparent;")
         rh = QHBoxLayout(right); rh.setContentsMargins(0, 0, 0, 0); rh.setSpacing(0)
         rh.addWidget(opt, stretch=1)
@@ -754,13 +719,7 @@ class MainWindow(QMainWindow):
 
     # ── Životni ciklus workera ────────────────────────────────────────
     def _reap_worker(self, attr: str):
-        """Ispušta referencu na worker tek kad thread stvarno izađe.
-
-        Vezuje se na QThread.finished (ne na naš `done`), jer se `done`
-        emituje iz run() dok je thread još živ. Brisanje QThread objekta u tom
-        trenutku ubija proces — a to je bilo lako pogoditi na velikim
-        meshevima, gde handler posle `done` radi sekundu-dve na renderu.
-        """
+        """Ispušta referencu na worker tek kad thread stvarno izađe."""
         w = getattr(self, attr, None)
         setattr(self, attr, None)
         if w is not None:
@@ -776,8 +735,7 @@ class MainWindow(QMainWindow):
         self.btn_convert.setEnabled(loaded and not busy)
         self.btn_ascii.setEnabled(loaded and not busy)
         self.btn_obj.setEnabled(loaded and not busy)
-        # Cela sekcija, ne samo slajder — radio dugmad su ranije izgledala
-        # aktivno iako nisu radila ništa dok nema fajla.
+        # Cela sekcija, ne samo slajder.
         self._opt_section.setEnabled(loaded and not busy)
 
         s = self.model.stats_dict()
@@ -858,8 +816,8 @@ class MainWindow(QMainWindow):
             name, f"{self._human_size(path)} · {o.verts:,} tačaka")
 
         self.status.showMessage("Priprema 3D prikaza…")
-        # Render velikog mesha drži main thread; wait kursor je jedini signal
-        # da app radi, jer se u međuvremenu ništa ne iscrtava.
+        # Render velikog mesha drži main thread — wait kursor je jedini signal
+        # da aplikacija radi.
         QApplication.processEvents()
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
@@ -929,8 +887,7 @@ class MainWindow(QMainWindow):
         out_txt = str(_Path(path).with_suffix(".txt"))
         ms_script = str(_Path(__file__).parent.parent / "core" / "export_ascii.ms")
 
-        # Konverzija koristi istu zonu kao i učitavanje — jedno mesto za
-        # napredak, umesto trake dole kod dugmeta za decimaciju.
+        # Konverzija koristi istu zonu kao i učitavanje.
         self.file_zone.set_loading(_Path(path).name, "konverzija u 3ds Max…")
         self.btn_load_max.setEnabled(False)
         self.status.showMessage(f"Konverzija .max → ASCII: {_Path(path).name}…")
@@ -959,9 +916,7 @@ class MainWindow(QMainWindow):
             return
         pct    = self.slider.value()
         ratio  = 1.0 - pct / 100.0
-        # "auto" bira najbolju dostupnu metodu (VTK → pyfqmr → QEM → cluster).
-        # Ranije je bilo hardkodovano "pyfqmr", koji na elisi ne dostiže target
-        # i gubi konturu — vidi core/decimator.py i .claude/ZADATAK.md.
+        # "auto" bira najbolju dostupnu metodu merenjem — vidi core/decimator.py.
         method = "auto" if self.rb_qec.isChecked() else "cluster"
         self.progress.start()
         self.btn_convert.setEnabled(False)
@@ -1044,9 +999,8 @@ class MainWindow(QMainWindow):
             "✕  Izađi" if self._fullscreen_viewer else "⤢  Ceo ekran")
 
     def closeEvent(self, event):
-        # Ako se app zatvori dok worker radi, interpreter bi rušio QThread koji
-        # je još u run() — isti pad kao kod ranog ispuštanja reference. Čekamo
-        # ga, ograničeno, da zatvaranje ne visi ako se posao zaglavi.
+        # Na worker se čeka ograničeno — da se ne uništi QThread koji je još u
+        # run(), ali i da zatvaranje ne visi ako se posao zaglavi.
         for attr in ("worker", "load_worker", "max_worker"):
             w = getattr(self, attr, None)
             if w is not None and w.isRunning():

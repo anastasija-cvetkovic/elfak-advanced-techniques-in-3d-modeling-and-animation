@@ -1,19 +1,8 @@
 """
-core/max_finder.py
 Pronalaženje instalacije 3ds Max.
 
-Redosled traženja ide od najpouzdanijeg ka najslabijem:
-
-    1. putanja koju je korisnik ručno izabrao (pamti se između pokretanja)
-    2. promenljive okoline ADSK_3DSMAX_* koje Autodesk sam postavlja
-    3. registry HKLM\\SOFTWARE\\Autodesk\\3dsMax\\<verzija>\\Installdir
-    4. PATH
-    5. uobičajene instalacione putanje
-
-Poenta je da korisnik ne bude ograničen time gde je instalirao Max. Ranija
-verzija je proveravala samo četiri fiksne putanje na C: i D: unutar foldera
-"Autodesk" — instalacija u "E:\\tools\\3ds Max 2027\\" nije bila pronađena,
-pa je aplikacija tvrdila da Max ne postoji.
+Redosled: korisnikov ručni izbor → ADSK_3DSMAX_* promenljive → registry →
+PATH → uobičajene instalacione putanje.
 """
 
 from __future__ import annotations
@@ -26,7 +15,6 @@ import shutil
 _EXE = "3dsmax.exe"
 _BATCH = "3dsmaxbatch.exe"
 
-# Poslednja opcija — ako ni registry ni env varijable ne daju odgovor.
 _PATTERNS = [
     r"C:\Program Files\Autodesk\3ds Max *\3dsmax.exe",
     r"C:\Program Files (x86)\Autodesk\3ds Max *\3dsmax.exe",
@@ -139,10 +127,7 @@ def _from_patterns() -> list[tuple[tuple, str]]:
 # ── javni API ─────────────────────────────────────────────────────────────────
 
 def find_max_exe() -> str | None:
-    """
-    Vraća putanju do 3dsmax.exe, ili None ako nije pronađen nigde.
-    Korisnikov ručni izbor ima prednost nad svim automatskim metodama.
-    """
+    """Putanja do 3dsmax.exe, ili None. Ručni izbor ima prednost nad detekcijom."""
     saved = get_saved_max_exe()
     if saved:
         return saved
@@ -168,10 +153,7 @@ def find_all_max_exe() -> list[str]:
 
 
 def find_batch_exe(max_exe: str) -> str | None:
-    """
-    3dsmaxbatch.exe iz istog foldera — Autodesk-ov alat za headless pokretanje,
-    pouzdaniji od `3dsmax.exe -q -silent`. Postoji od verzije 2016.
-    """
+    """3dsmaxbatch.exe iz istog foldera — Autodesk-ov alat za headless pokretanje."""
     if not max_exe:
         return None
     batch = os.path.join(os.path.dirname(max_exe), _BATCH)

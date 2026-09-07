@@ -10,20 +10,11 @@
 -- Poziva se iz core/converter.py, koji putanje prosledjuje kroz promenljive
 -- okoline MAX_INPUT i MAX_OUTPUT. Bez njih radi interaktivno, sa dijalogom.
 --
--- VAZNO: ceo posao je umotan u try/catch i greska se upisuje u <izlaz>.err.
--- Skripta se pokrece kao startup script (-U MAXScript); ako startup skripta
--- baci izuzetak, Max to prijavi kao pad instalacije i ponudi "Restore Factory
--- Settings", sto zbunjuje korisnika. Zato odavde ne sme da izadje izuzetak.
+-- Iz skripte ne sme da izadje izuzetak: greske se upisuju u <izlaz>.err, jer
+-- startup skripta koja baci izuzetak natera Max da prijavi pad instalacije.
 --
--- FORMAT BROJEVA: formattedPrint format:".6f" daje isti zapis kao profesorov
--- TORUS.txt ("102.921271 -0.000006 -65.231792"). Obican `format "%" v.x` NE
--- valja jer stampa 6 znacajnih cifara i prelazi u naucnu notaciju, pa bi
--- -0.000006 ispalo kao "-6e-06".
---
--- KOORDINATE: pisu se sirovo, tacno kako stoje u Max-u. Provereno merenjem:
--- 1.max exportovan ovom skriptom i uporedjen sa profesorovom elisa.txt (isti
--- model) -> 673/1042 tacaka se poklapa (64.6%) sa sirovim koordinatama, a
--- 0/1042 ako se radi Y-up zamena osa. Dakle nikakva konverzija se ne radi.
+-- Brojevi idu kroz formattedPrint format:".6f" (obican format "%" prelazi u
+-- naucnu notaciju), a koordinate se pisu sirovo, bez konverzije osa.
 --------------------------------------------------------------------------------
 
 fn writeError errPath msg = (
@@ -53,8 +44,7 @@ fn exportSceneToASCII outPath = (
     if objs.count == 0 then
         throw "u sceni nema geometrije koja se moze konvertovati u mesh"
 
-    -- snapshotAsMesh primenjuje transformaciju objekta, pa su koordinate vec
-    -- u svetskom prostoru.
+    -- snapshotAsMesh daje koordinate u svetskom prostoru.
     local meshes = #()
     local totalV = 0
     local totalF = 0
@@ -65,7 +55,7 @@ fn exportSceneToASCII outPath = (
         totalF += m.numfaces
     )
 
-    -- createFile, ne openFile — openFile je za citanje postojeceg fajla.
+    -- createFile, ne openFile (openFile je za citanje).
     local f = createFile outPath
     if f == undefined then
         throw ("ne mogu da otvorim izlazni fajl: " + outPath)
@@ -84,8 +74,8 @@ fn exportSceneToASCII outPath = (
         )
     )
 
-    -- 2) svi trouglovi; MAXScript indeksira od 1, format iz zadatka od 0, a
-    --    svaki sledeci objekat se pomera za broj vec ispisanih tacaka.
+    -- 2) svi trouglovi; MAXScript indeksira od 1, format od 0, uz pomeranje
+    --    indeksa za broj vec ispisanih tacaka.
     local offset = 0
     for m in meshes do (
         for i = 1 to m.numfaces do (

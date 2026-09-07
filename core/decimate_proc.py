@@ -1,44 +1,10 @@
 """
-core/decimate_proc.py
 Decimacija velikih mesheva u odvojenom procesu.
 
-Zašto proces, a ne samo thread
-------------------------------
-VTK, pyfqmr i fast_simplification su native biblioteke koje ne otpuštaju GIL
-dok rade. Dok decimacija traje u QThread-u, main thread ne izvršava Python —
-pa QTimer koji animira traku napretka ne dobija tick-ove. Izmereno na
-`DRAGON.txt` (435 545 tačaka / 871 306 trouglova, ratio 0.5, metoda "auto"),
-sa QTimer-om na 16 ms kao u SweepBar-u:
-
-    tick-ova            224 od očekivanih 726   (30.8%)
-    najveći prekid      4512 ms
-    prekida > 100 ms    8
-
-Dakle traka stoji po nekoliko sekundi — tačno ono što se vidi kao "loader koči".
-U odvojenom procesu GIL main thread-a niko ne drži, pa animacija ide normalno.
-
-Drugi razlog je bezbednost: VTK nije thread-safe. `decimator._try_vtk` pravi
-vtkPolyData i vrti vtkQuadricDecimation u worker thread-u, dok main thread u
-isto vreme renderuje dva živa vtkRenderWindow-a (a korisnik, pošto traka stoji,
-najverovatnije i vrti model da proveri da li je app živ). Podproces ta dva
-VTK pipeline-a razdvaja u potpunosti.
-
-Cena
-----
-Start Pythona sa potrebnim importima je izmeren na ~1.8 s:
-
-    numpy                    0.31 s
-    numpy + pyvista          1.12 s
-    numpy + pyvista + scipy  1.77 s
-
-Na DRAGON-u je to 1.8 s na 12 s posla — prihvatljivo. Na meshevima iz zadatka
-(TORUS, elisa — reda hiljadu trouglova) decimacija traje desetinke sekunde, pa
-bi podproces bio višestruko skuplji od samog posla i ništa ne bi dobio: takav
-posao ne uspeva ni da zadrži GIL dovoljno dugo da se primeti. Zato prag ispod
-odlučuje, a ne fiksno pravilo.
-
-Razmena podataka ide preko .npy fajlova u temp direktorijumu, ne preko pipe-a:
-nizovi su reda 20 MB, a np.save/np.load na njima traje milisekunde.
+VTK, pyfqmr i fast_simplification su native biblioteke koje ne otpuštaju GIL,
+pa u QThread-u zamrznu UI; uz to VTK nije thread-safe, a main thread u isto
+vreme renderuje dva živa vtkRenderWindow-a. Razmena podataka ide preko .npy
+fajlova u temp direktorijumu.
 """
 
 from __future__ import annotations
@@ -50,23 +16,11 @@ from pathlib import Path
 
 import numpy as np
 
-# Prag je izabran po izmerenom trajanju decimacije u tekućem procesu ("auto",
-# ratio 0.5) — to je istovremeno i dužina zamrznutog UI-ja:
-#
-#     TORUS         480 f     0.05 s
-#     elisa       2 574 f     0.09 s
-#     COW         5 804 f     0.05 s
-#     BUNNY      69 451 f     0.72 s
-#     ARMADILLO 345 944 f     4.5  s
-#     DRAGON    871 306 f    11.6  s
-#
-# Dakle ~13 µs po trouglu. Do oko sekunde zamrznuta traka se praktično ne vidi
-# i ne vredi trostruko usporiti posao zbog nje; iznad par sekundi izgleda kao
-# da je app stao. 150 000 trouglova je ta granica (~2 s).
+# Ispod ovog praga posao traje do ~2 s, pa se zamrznuti UI praktično ne vidi,
+# a pokretanje podprocesa (~1,8 s) bilo bi skuplje od samog posla.
 PROC_MIN_FACES = 150_000
 
-# Gornja granica čekanja: 60 s minimum, pa linearno sa veličinom mesha, da
-# zaglavljen podproces ne drži UI zauvek. Na DRAGON-u (12 s posla) prag je 60 s.
+# Gornja granica čekanja: 60 s minimum, pa linearno sa veličinom mesha.
 _TIMEOUT_BASE_S      = 60.0
 _TIMEOUT_FACES_PER_S = 20_000.0
 
@@ -84,9 +38,8 @@ def decimate_auto(
     """
     Decimira mesh — u podprocesu ako je velik, inače na mestu.
 
-    Ako podproces padne iz bilo kog razloga (nema python.exe, greška u
-    startovanju), vraća se na izvršavanje u tekućem procesu: UI će tada
-    zamrznuti, ali aplikacija radi. Greška same decimacije se propušta dalje.
+    Ako se podproces ne može pokrenuti, vraća se na izvršavanje u tekućem
+    procesu. Greška same decimacije se propušta dalje.
     """
     if not should_use_process(faces):
         from core.decimator import decimate
@@ -119,8 +72,7 @@ def _decimate_in_process(
             sys.executable, "-u", str(Path(__file__).resolve()),
             str(in_v), str(in_f), str(ratio), method, str(out_v), str(out_f),
         ]
-        # Bez ovoga bi svaki poziv blicnuo crni konzolni prozor kada je app
-        # pokrenut preko pythonw.exe.
+        # Bez ovoga bi svaki poziv blicnuo konzolni prozor pod pythonw.exe.
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
         try:

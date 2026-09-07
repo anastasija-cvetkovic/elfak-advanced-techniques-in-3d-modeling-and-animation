@@ -1,15 +1,8 @@
 """
-ui/viewer_widget.py
-MeshViewer — dva PyVista QtInteractor-a jedan pored drugog (before/after).
-Modovi prikaza: "solid" (surface + ivice), "smooth" (surface bez ivica), "wireframe"
+MeshViewer — dva PyVista panela jedan pored drugog (original / decimirani).
 
-Optimizacije:
-  • PolyData se pravi jednom po učitavanju i keš-ira (bez rekreacije pri
-    svakom mode switch-u).
-  • Verzija sa normalama (za smooth mode) se računa lazy — tek prvi put
-    kad korisnik pređe u smooth mode.
-  • reset_camera se poziva samo pri promeni podataka, ne pri mode switch-u
-    (bolji UX — rotacija se ne gubi).
+Modovi: "solid" (surface + ivice), "smooth" (surface bez ivica), "wireframe".
+PolyData se kešira po učitavanju; verzija sa normalama se računa lenjo.
 """
 
 from __future__ import annotations
@@ -49,7 +42,7 @@ class _FallbackPanel(QWidget):
         lv.addWidget(lbl)
 
 
-# Konfiguracija po modu: (style, show_edges, smooth_shading)
+# (style, show_edges, smooth_shading)
 _MODE_CFG = {
     "solid":     ("surface",   True,  False),
     "smooth":    ("surface",   False, True),
@@ -63,17 +56,12 @@ _COLORS = {
 
 
 class MeshViewer(QWidget):
-    """
-    Widget sa dva 3D panela (ORIGINAL / DECIMIRANI).
-    Podržava tri moda: solid, smooth, wireframe.
-    """
+    """Widget sa dva 3D panela (ORIGINAL / DECIMIRANI)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._mode = "solid"
 
-        # Keš PolyData objekata — jedan po strani, plus opciono
-        # verzija sa normalama za smooth mode (lazy).
         self._orig_pd:        "pv.PolyData | None" = None
         self._orig_pd_smooth: "pv.PolyData | None" = None
         self._dec_pd:         "pv.PolyData | None" = None
@@ -119,9 +107,6 @@ class MeshViewer(QWidget):
 
     @staticmethod
     def _to_polydata(verts: np.ndarray, faces: np.ndarray) -> "pv.PolyData":
-        """
-        Pravi PyVista PolyData bez suvišnih kopija.
-        """
         pts = np.ascontiguousarray(verts, dtype=np.float64)
         f   = np.ascontiguousarray(faces, dtype=np.int32)
 
@@ -133,10 +118,7 @@ class MeshViewer(QWidget):
         return pv.PolyData(pts, cells.reshape(-1))
 
     def _get_polydata(self, side: str) -> "pv.PolyData | None":
-        """
-        Vraća PolyData za zadatu stranu ("orig" ili "dec") — sa normalama
-        ako je trenutni mod smooth (lazy izračunato i keširano).
-        """
+        """PolyData za stranu ("orig" / "dec"), sa normalama ako je mod smooth."""
         need_normals = (self._mode == "smooth")
         if side == "orig":
             base = self._orig_pd
@@ -201,7 +183,6 @@ class MeshViewer(QWidget):
     def show_original(self, verts: np.ndarray, faces: np.ndarray) -> None:
         if not PYVISTA_OK:
             return
-        # Nova podataka → nov keš, invalidiraj smooth verziju
         self._orig_pd = self._to_polydata(verts, faces)
         self._orig_pd_smooth = None
         self._render(self.pl_before, "orig", reset_camera=True)
@@ -214,10 +195,7 @@ class MeshViewer(QWidget):
         self._render(self.pl_after, "dec", reset_camera=True)
 
     def set_display_mode(self, mode: str) -> None:
-        """
-        Prebacuje mod prikaza: 'solid' | 'smooth' | 'wireframe'.
-        Ne resetuje kameru — korisnik zadržava trenutni pogled.
-        """
+        """Prebacuje mod prikaza. Ne resetuje kameru."""
         if not PYVISTA_OK or mode not in _MODE_CFG:
             return
         self._mode = mode

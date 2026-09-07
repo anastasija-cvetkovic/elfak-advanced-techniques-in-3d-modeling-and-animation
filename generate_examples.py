@@ -1,8 +1,4 @@
-"""
-generate_examples.py
-Generiše test ASCII mesh fajlove za aplikaciju.
-Pokretanje: python generate_examples.py
-"""
+"""Generiše test ASCII mesh fajlove. Pokretanje: python generate_examples.py"""
 
 import sys
 from pathlib import Path
@@ -18,7 +14,7 @@ OUTPUT_DIR = Path(__file__).parent
 
 
 def save_ascii(path: Path, mesh: "pv.PolyData") -> int:
-    """Čuva PyVista mesh u ASCII formatu koji app čita. Vraća broj trouglova."""
+    """Čuva PyVista mesh u ASCII formatu. Vraća broj trouglova."""
     mesh = mesh.triangulate().clean()
     verts = mesh.points
     faces_raw = mesh.faces.reshape(-1, 4)[:, 1:]  # ukloni leading '3'
