@@ -104,20 +104,6 @@ nezavisna eksporta:
 | najveće odstupanje od zadate mreže | 1,93% dijagonale |
 | bounding box | `X ±123,64`, `Y ±117,28`, identičan |
 
-Razlika u broju temena dolazi od toga kako Max spaja temena pri `snapshotAsMesh`; oblik je isti.
-
-[`core/export_ascii.ms`](core/export_ascii.ms) radi u dva režima. Automatski čita `MAX_INPUT` /
-`MAX_OUTPUT`, učita scenu, eksportuje i zatvori Max, bez dijaloga. Interaktivni (bez tih
-promenljivih) eksportuje trenutnu scenu uz „Sačuvaj kao". Geometrija cele scene se spaja u
-jednu listu uz pomeranje indeksa (`offset += m.numverts`), koordinate su svetske
-(`snapshotAsMesh`), a indeksi se prevode iz 1-based u 0-based.
-
-Max se pokreće vidljivo, ne headless. `3dsmaxbatch.exe` na edukacionoj licenci izlazi sa kodom
-`-12` pre nego što uopšte pročita skriptu, dok interaktivni Max na istoj licenci radi normalno.
-Ako je Max već pokrenut, konverzija se ne izvršava; aplikacija to prepozna i javi poruku.
-Putanja do `3dsmax.exe` se traži kroz registry, `ADSK_3DSMAX_*` promenljive i `PATH`, a može se
-i izabrati ručno (izbor se pamti).
-
 ## Aplikacija
 
 1. Učitaj: prevuci `.txt` u zonu ili klikni za dijalog; za `.max` fajlove postoji dugme
