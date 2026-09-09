@@ -174,13 +174,6 @@ flowchart LR
 ├── package_release.py        ← sklapa ZIP za isporuku
 └── TORUS.txt                 ← primer iz zadatka
 ```
-
-Učitavanje, decimacija i konverzija iz Max-a rade u `QThread`-ovima da prozor ne zamrzne. To ne
-rešava GIL: VTK i `pyfqmr` su native biblioteke koje ga ne otpuštaju, pa traka napretka staje po
-nekoliko sekundi (na `DRAGON.txt` je dobijala 224 od 726 tick-ova, najduži prekid 4,5 s). Zato
-mreže od 150.000 trouglova naviše idu u odvojen proces, preko `.npy` fajlova. Ispod tog praga
-posao traje oko 2 s i podproces bi bio skuplji od njega.
-
 ## Performanse
 
 Windows 11, Python 3.12, ratio 0.5, metoda `auto`:
