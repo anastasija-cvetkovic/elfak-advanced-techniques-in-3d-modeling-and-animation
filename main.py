@@ -3,16 +3,29 @@
 import faulthandler
 import sys
 from datetime import datetime
-from pathlib import Path
+
+# Decimacija velikih mesheva ide u podprocesu. Kao .exe nema zasebnog Python
+# interpretera koji bi pokrenuo core/decimate_proc.py, pa se isti program
+# pokreće ponovo sa ovom zastavicom. Mora pre Qt uvoza — dete ne pravi GUI.
+if len(sys.argv) > 1 and sys.argv[1] == "--decimate-worker":
+    from core.decimate_proc import run_worker
+
+    sys.exit(run_worker(sys.argv[2:]))
+
+# Provera spakovane verzije bez konzole — vidi core/selftest.py.
+if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
+    from core.selftest import run
+
+    sys.exit(run())
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
 
+from core.paths import resource_path, user_data_dir
 from ui.main_window import MainWindow
 
 # Padovi u native kodu (VTK/OpenGL) ne prolaze kroz Python izuzetke, pa
 # faulthandler upisuje C stack u crash.log. Fajl ostaje otvoren dok proces živi.
-_CRASH_LOG = open(Path(__file__).parent / "crash.log", "a", buffering=1)
+_CRASH_LOG = open(user_data_dir() / "crash.log", "a", buffering=1)
 _CRASH_LOG.write(f"\n=== pokretanje {datetime.now():%Y-%m-%d %H:%M:%S} ===\n")
 faulthandler.enable(file=_CRASH_LOG, all_threads=True)
 
@@ -23,7 +36,7 @@ def main():
     app.setOrganizationName("MaxMeshDecimator")
 
     # Učitavanje QSS stila
-    qss_path = Path(__file__).parent / "ui" / "styles.qss"
+    qss_path = resource_path("ui", "styles.qss")
     if qss_path.exists():
         with open(qss_path, "r", encoding="utf-8") as f:
             app.setStyleSheet(f.read())

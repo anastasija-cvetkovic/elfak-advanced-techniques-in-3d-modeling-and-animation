@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import numpy as np
 
+# Ne hvata se samo ImportError: VTK je native, pa neuspelo učitavanje DLL-a ume
+# da izađe i kao OSError ili RuntimeError. Razlog se pamti — bez njega spakovana
+# verzija ćutke ostane bez 3D prikaza i nema se odakle videti zašto.
 try:
     from pyvistaqt import QtInteractor
     import pyvista as pv
     PYVISTA_OK = True
-except ImportError:
+    PYVISTA_ERR = ""
+except Exception as e:
     PYVISTA_OK = False
+    PYVISTA_ERR = f"{type(e).__name__}: {e}"
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QFrame
@@ -36,8 +41,12 @@ class _FallbackPanel(QWidget):
     def __init__(self, label: str, parent=None):
         super().__init__(parent)
         lv = QVBoxLayout(self)
-        lbl = QLabel(f"{label}\n\n(PyVista nije dostupna)", self)
+        text = f"{label}\n\n(PyVista nije dostupna)"
+        if PYVISTA_ERR:
+            text += f"\n\n{PYVISTA_ERR}"
+        lbl = QLabel(text, self)
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setWordWrap(True)
         lbl.setStyleSheet("color: #555; font-size: 13px;")
         lv.addWidget(lbl)
 

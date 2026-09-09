@@ -31,8 +31,8 @@ _REG_KEYS = [
 # ── trajno pamćenje korisnikovog izbora ───────────────────────────────────────
 
 def _config_path() -> str:
-    base = os.environ.get("APPDATA") or os.path.expanduser("~/.config")
-    return os.path.join(base, "MaxMeshDecimator", "settings.json")
+    from core.paths import user_data_dir
+    return str(user_data_dir() / "settings.json")
 
 
 def get_saved_max_exe() -> str | None:

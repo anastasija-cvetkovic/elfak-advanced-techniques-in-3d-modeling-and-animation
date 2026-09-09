@@ -27,6 +27,8 @@ COW.txt
 dist/
 build/
 *.spec
+# recept za build ide u repo
+!konvertor.spec
 *.exe
 
 # IDE

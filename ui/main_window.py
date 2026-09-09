@@ -24,6 +24,7 @@ from PyQt6.QtGui import (
 
 from core.mesh_model import MeshModel
 from core.max_finder import find_max_exe, save_max_exe, max_version_from_path
+from core.paths import resource_path
 from ui.viewer_widget import MeshViewer
 
 
@@ -885,7 +886,7 @@ class MainWindow(QMainWindow):
 
         from pathlib import Path as _Path
         out_txt = str(_Path(path).with_suffix(".txt"))
-        ms_script = str(_Path(__file__).parent.parent / "core" / "export_ascii.ms")
+        ms_script = str(resource_path("core", "export_ascii.ms"))
 
         # Konverzija koristi istu zonu kao i učitavanje.
         self.file_zone.set_loading(_Path(path).name, "konverzija u 3ds Max…")

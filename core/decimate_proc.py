@@ -16,6 +16,13 @@ from pathlib import Path
 
 import numpy as np
 
+# Kao skripta (dete pokrenuto iz izvornog koda) sys.path sadrži core/, a ne
+# koren projekta — bez ovoga uvoz `core.*` ispod ne bi prošao.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core.paths import is_frozen
+
 # Ispod ovog praga posao traje do ~2 s, pa se zamrznuti UI praktično ne vidi,
 # a pokretanje podprocesa (~1,8 s) bilo bi skuplje od samog posla.
 PROC_MIN_FACES = 150_000
@@ -68,10 +75,8 @@ def _decimate_in_process(
         np.save(in_v, np.ascontiguousarray(verts, dtype=np.float64))
         np.save(in_f, np.ascontiguousarray(faces, dtype=np.int32))
 
-        cmd = [
-            sys.executable, "-u", str(Path(__file__).resolve()),
-            str(in_v), str(in_f), str(ratio), method, str(out_v), str(out_f),
-        ]
+        args = [str(in_v), str(in_f), str(ratio), method, str(out_v), str(out_f)]
+        cmd = _worker_cmd(args)
         # Bez ovoga bi svaki poziv blicnuo konzolni prozor pod pythonw.exe.
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -96,6 +101,19 @@ def _decimate_in_process(
         return np.load(out_v), np.load(out_f)
 
 
+def _worker_cmd(args: list[str]) -> list[str]:
+    """
+    Komanda koja pokreće dete.
+
+    Iz izvornog koda sys.executable je python.exe, pa se prosleđuje ova skripta.
+    Kao .exe sys.executable je sama aplikacija — nje ovaj fajl na disku ni nema,
+    pa se program pokreće ponovo sa zastavicom koju main.py hvata pre Qt-a.
+    """
+    if is_frozen():
+        return [sys.executable, "--decimate-worker", *args]
+    return [sys.executable, "-u", str(Path(__file__).resolve()), *args]
+
+
 def _child_error(proc: subprocess.CompletedProcess) -> str:
     """Poslednje smislene linije stderr-a podprocesa, za status bar."""
     lines = [l.strip() for l in (proc.stderr or "").splitlines() if l.strip()]
@@ -105,10 +123,9 @@ def _child_error(proc: subprocess.CompletedProcess) -> str:
 
 # ── Podproces ─────────────────────────────────────────────────────────────────
 
-def _main(argv: list[str]) -> int:
+def run_worker(argv: list[str]) -> int:
+    """Telo deteta — poziva ga i main.py (frozen) i __main__ ispod (izvorni kod)."""
     in_v, in_f, ratio, method, out_v, out_f = argv
-    # Pokreće se kao skripta, pa koren projekta nije na sys.path-u.
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from core.decimator import decimate
 
     v, f = np.load(in_v), np.load(in_f)
@@ -119,4 +136,4 @@ def _main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(_main(sys.argv[1:]))
+    sys.exit(run_worker(sys.argv[1:]))

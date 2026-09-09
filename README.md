@@ -1,4 +1,4 @@
-# 3ds Max → ASCII konvertor
+﻿# 3ds Max → ASCII konvertor
 
 Desktop aplikacija koja konvertuje `.max` scene u ASCII zapis trougaone mreže, decimira mrežu
 tako da konture modela ostanu sačuvane i prikazuje rezultat pored originala u 3D.
@@ -188,13 +188,15 @@ flowchart LR
 ```
 
 ```
-├── main.py                   ← entry point
+├── main.py                   ← entry point (+ dispatch podprocesa u .exe-u)
 ├── core/
 │   ├── converter.py          ← ASCII load/save + pokretanje 3ds Max-a
 │   ├── decimator.py          ← 4 metode + _shape_error ocenjivanje
 │   ├── decimate_proc.py      ← velike mreže u odvojenom procesu
 │   ├── mesh_model.py         ← centralno stanje, statistike, greška
 │   ├── max_finder.py         ← pronalaženje 3dsmax.exe
+│   ├── paths.py              ← resursi i %APPDATA%, isto iz koda i iz .exe-a
+│   ├── selftest.py           ← --selftest: provera uvoza i renderovanja
 │   └── export_ascii.ms       ← MAXScript: .max → ASCII
 ├── ui/
 │   ├── main_window.py        ← glavni prozor, workeri, drag&drop
@@ -202,6 +204,8 @@ flowchart LR
 │   └── styles.qss            ← tamna tema
 ├── docs/make_figures.py      ← generiše slike iz ovog README-a
 ├── generate_examples.py      ← test ASCII fajlovi
+├── konvertor.spec            ← PyInstaller recept
+├── package_release.py        ← sklapa ZIP za isporuku
 └── TORUS.txt                 ← primer iz zadatka
 ```
 
@@ -235,11 +239,53 @@ python main.py
 
 3ds Max je potreban samo za `.max` fajlove; ASCII fajlovi ne zahtevaju ništa osim Pythona.
 
-Pakovanje u samostalni `.exe`:
+Pakovanje u samostalni `.exe` — recept je u `konvertor.spec`:
 
 ```bash
-pyinstaller --onefile --windowed --name MeshConverter --add-data "ui/styles.qss;ui" main.py
+pyinstaller konvertor.spec
+python package_release.py
 ```
+
+Prvi korak pravi `dist/3DS Max ASCII Konvertor/`, drugi od toga sklapa ZIP sa primerima i
+uputstvom. Namerno `--onedir`, ne `--onefile`: PyQt6 i VTK su nekoliko stotina megabajta, pa bi
+onefile pri svakom pokretanju raspakivao sve u temp, a VTK-ovi native DLL-ovi u tom režimu često
+ni ne prođu učitavanje.
+
+Tri stvari koje u spakovanoj verziji rade drugačije nego iz izvornog koda, sve kroz `core/paths.py`:
+
+| | izvorni kod | `.exe` |
+|---|---|---|
+| `styles.qss`, `export_ascii.ms` | koren projekta | `sys._MEIPASS` (privremen, briše se po izlasku) |
+| `settings.json`, `crash.log` | `%APPDATA%\MeshConverter\` | isto — `_MEIPASS` ne bi preživeo gašenje |
+| podproces za decimaciju | `python core/decimate_proc.py` | `<exe> --decimate-worker` |
+| okruženje za 3ds Max | `os.environ` | `clean_env()` — bez Qt promenljivih |
+
+Podproces je najosetljiviji: `sys.executable` u spakovanoj verziji je sama aplikacija, pa bi
+stara komanda pokrenula drugu kopiju GUI-ja umesto radnika. Zato `main.py` zastavicu hvata pre
+nego što napravi `QApplication`.
+
+Provera spakovane verzije:
+
+```bash
+"dist/3DS Max ASCII Konvertor/3DS Max ASCII Konvertor.exe" --selftest
+```
+
+Prolazi kroz uvoze redom od numpy-ja do `pyvistaqt`, pa renderuje sferu offscreen i broji koliko
+piksela nije pozadina. Izveštaj ide u `%APPDATA%\MeshConverter\selftest.txt` jer GUI build nema
+konzolu. Postoji zato što `viewer_widget` neuspeli uvoz PyVista-e hvata i prelazi na prazne
+panele — aplikacija se normalno otvori, samo bez 3D prikaza, i iz samog builda se ne vidi zašto.
+
+Dve zamke pri pakovanju, obe otkrivene tek na spakovanoj verziji:
+
+`pooch` liči na alat za preuzimanje primera koji se u `excludes` može izbaciti, ali ga
+`import pyvista` povlači bezuslovno — bez njega ceo 3D prikaz tiho otkaže. `pandas` i `pyarrow`,
+suprotno, nisu potrebni i njihovo izbacivanje skida ~60 MB.
+
+PyInstaller-ov runtime hook za PyQt6 upisuje `QT_PLUGIN_PATH` i `QML2_IMPORT_PATH` u okruženje
+procesa i gura `_internal` na početak `PATH`-a. Sve to nasleđuje svaki podproces — a 3ds Max je i
+sam Qt aplikacija, pa je startovao sa **našim** Qt-om i padao uz „Startup Failure Detection".
+Zato `converter.py` Max pokreće sa `clean_env()`, ne sa `os.environ`. Podproces decimacije je
+izuzetak: to je ista ova aplikacija i te promenljive su joj potrebne.
 
 Test ASCII mreže (sfera, cilindar, konus, Möbius, torus, plus Stanford modeli ako ima interneta)
 i slike iz ovog README-a:

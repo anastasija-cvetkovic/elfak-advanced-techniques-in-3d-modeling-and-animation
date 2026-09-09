@@ -6,6 +6,8 @@ import os
 import time
 import numpy as np
 
+from core.paths import clean_env
+
 
 def load_mesh(path: str) -> tuple[np.ndarray, np.ndarray]:
     """Čita ASCII mesh fajl i vraća verts (N, 3) float64 i faces (M, 3) int32."""
@@ -45,6 +47,7 @@ def export_from_max(max_exe: str, ms_script: str) -> None:
 
     subprocess.Popen(
         [max_exe, "-U", "MAXScript", str(ms_script)],
+        env=clean_env(),
         creationflags=subprocess.DETACHED_PROCESS
         if os.name == "nt" else 0,
     )
@@ -94,7 +97,7 @@ def export_from_max_gui(
     if os.path.exists(output_txt):
         os.remove(output_txt)
 
-    env = os.environ.copy()
+    env = clean_env()
     env["MAX_INPUT"]  = os.path.abspath(input_max)
     env["MAX_OUTPUT"] = os.path.abspath(output_txt)
 
@@ -161,7 +164,7 @@ def export_from_max_headless(
     if not os.path.exists(input_max):
         raise FileNotFoundError(f"Ulazni .max fajl ne postoji: {input_max}")
 
-    env = os.environ.copy()
+    env = clean_env()
     env["MAX_INPUT"]  = str(input_max)
     env["MAX_OUTPUT"] = str(output_txt)
 
