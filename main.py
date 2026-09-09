@@ -32,7 +32,7 @@ faulthandler.enable(file=_CRASH_LOG, all_threads=True)
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("3DS Max ASCII Konvertor")
+    app.setApplicationName("Max Mesh Decimator")
     app.setOrganizationName("MaxMeshDecimator")
 
     # Učitavanje QSS stila

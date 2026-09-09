@@ -9,7 +9,7 @@ native DLL-ovi u tom režimu često i ne prođu učitavanje.
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-APP_NAME = "3DS Max ASCII Konvertor"
+APP_NAME = "Max Mesh Decimator"
 
 # VTK se skoro sve uvozi dinamički (pyvista bira module u runtime-u), pa ga
 # statička analiza ne vidi — otud collect_submodules umesto nabrajanja.

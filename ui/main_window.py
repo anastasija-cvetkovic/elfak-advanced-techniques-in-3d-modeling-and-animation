@@ -979,7 +979,7 @@ class MainWindow(QMainWindow):
             verts = self.model.decimated_verts if use_dec else self.model.original_verts
             faces = self.model.decimated_faces if use_dec else self.model.original_faces
             with open(path, "w") as f:
-                f.write("# Exported by 3DS Max ASCII Konvertor\n")
+                f.write("# Exported by Max Mesh Decimator\n")
                 np.savetxt(f, verts, fmt="v %.6f %.6f %.6f")
                 # OBJ trouglovi su 1-based indeksi
                 np.savetxt(f, faces + 1, fmt="f %d %d %d")

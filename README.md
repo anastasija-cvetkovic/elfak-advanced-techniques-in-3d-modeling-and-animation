@@ -1,4 +1,4 @@
-﻿# 3ds Max → ASCII konvertor
+﻿# Max Mesh Decimator
 
 Desktop aplikacija koja konvertuje `.max` scene u ASCII zapis trougaone mreže, decimira mrežu
 tako da konture modela ostanu sačuvane i prikazuje rezultat pored originala u 3D.
@@ -246,7 +246,7 @@ pyinstaller konvertor.spec
 python package_release.py
 ```
 
-Prvi korak pravi `dist/3DS Max ASCII Konvertor/`, drugi od toga sklapa ZIP sa primerima i
+Prvi korak pravi `dist/Max Mesh Decimator/`, drugi od toga sklapa ZIP sa primerima i
 uputstvom. Namerno `--onedir`, ne `--onefile`: PyQt6 i VTK su nekoliko stotina megabajta, pa bi
 onefile pri svakom pokretanju raspakivao sve u temp, a VTK-ovi native DLL-ovi u tom režimu često
 ni ne prođu učitavanje.
@@ -256,7 +256,7 @@ Tri stvari koje u spakovanoj verziji rade drugačije nego iz izvornog koda, sve 
 | | izvorni kod | `.exe` |
 |---|---|---|
 | `styles.qss`, `export_ascii.ms` | koren projekta | `sys._MEIPASS` (privremen, briše se po izlasku) |
-| `settings.json`, `crash.log` | `%APPDATA%\MeshConverter\` | isto — `_MEIPASS` ne bi preživeo gašenje |
+| `settings.json`, `crash.log` | `%APPDATA%\MaxMeshDecimator\` | isto — `_MEIPASS` ne bi preživeo gašenje |
 | podproces za decimaciju | `python core/decimate_proc.py` | `<exe> --decimate-worker` |
 | okruženje za 3ds Max | `os.environ` | `clean_env()` — bez Qt promenljivih |
 
@@ -267,11 +267,11 @@ nego što napravi `QApplication`.
 Provera spakovane verzije:
 
 ```bash
-"dist/3DS Max ASCII Konvertor/3DS Max ASCII Konvertor.exe" --selftest
+"dist/Max Mesh Decimator/Max Mesh Decimator.exe" --selftest
 ```
 
 Prolazi kroz uvoze redom od numpy-ja do `pyvistaqt`, pa renderuje sferu offscreen i broji koliko
-piksela nije pozadina. Izveštaj ide u `%APPDATA%\MeshConverter\selftest.txt` jer GUI build nema
+piksela nije pozadina. Izveštaj ide u `%APPDATA%\MaxMeshDecimator\selftest.txt` jer GUI build nema
 konzolu. Postoji zato što `viewer_widget` neuspeli uvoz PyVista-e hvata i prelazi na prazne
 panele — aplikacija se normalno otvori, samo bez 3D prikaza, i iz samog builda se ne vidi zašto.
 

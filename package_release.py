@@ -5,7 +5,7 @@ Redosled:
     pyinstaller konvertor.spec
     python package_release.py
 
-Rezultat: dist/3DS-Max-ASCII-Konvertor.zip — exe, primeri i uputstvo.
+Rezultat: dist/Max-Mesh-Decimator.zip — exe, primeri i uputstvo.
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-APP_NAME = "3DS Max ASCII Konvertor"
+APP_NAME = "Max Mesh Decimator"
 BUILD_DIR = ROOT / "dist" / APP_NAME
 STAGE_DIR = ROOT / "dist" / "_paket"
-ZIP_BASE = ROOT / "dist" / "3DS-Max-ASCII-Konvertor"
+ZIP_BASE = ROOT / "dist" / "Max-Mesh-Decimator"
 
 # Primeri se generišu skriptom generate_examples.py i ne idu u repo, pa se traže
 # i u roditeljskom folderu gde su ranije generisani.
@@ -31,7 +31,7 @@ EXAMPLES = [
     "ARMADILLO.txt",       # ~350k — ide u podproces, UI ostaje živ
 ]
 
-README = """3DS Max ASCII Konvertor
+README = """Max Mesh Decimator
 ==================
 
 POKRETANJE
@@ -75,7 +75,7 @@ ASCII FORMAT
     ...
 
 AKO NESTO NE RADI
-    Detalji pada se upisuju u %APPDATA%\\MeshConverter\\crash.log
+    Detalji pada se upisuju u %APPDATA%\\MaxMeshDecimator\\crash.log
 
     Ako se prozor otvori ali 3D prikaz ostane prazan, pokreni u Command
     Promptu (cmd) iz foldera "{app}":
@@ -83,7 +83,7 @@ AKO NESTO NE RADI
         "{app}.exe" --selftest
 
     Izvestaj o tome sta nedostaje ostaje u
-    %APPDATA%\\MeshConverter\\selftest.txt
+    %APPDATA%\\MaxMeshDecimator\\selftest.txt
 """.format(app=APP_NAME)
 
 

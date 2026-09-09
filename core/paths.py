@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-_APP_DIR = "MeshConverter"
+_APP_DIR = "MaxMeshDecimator"
 
 
 def is_frozen() -> bool:

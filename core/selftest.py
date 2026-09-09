@@ -1,7 +1,7 @@
 """
-Provera spakovane verzije: `"3DS Max ASCII Konvertor.exe" --selftest`.
+Provera spakovane verzije: `"Max Mesh Decimator.exe" --selftest`.
 
-GUI build nema konzolu, pa se izveštaj upisuje i u %APPDATA%\\MeshConverter\\
+GUI build nema konzolu, pa se izveštaj upisuje i u %APPDATA%\\MaxMeshDecimator\\
 selftest.txt. Bez ovoga se ne vidi zašto 3D prikaz ćutke izostane — uvoz VTK-a
 puca u native sloju, a viewer_widget ga hvata i prelazi na fallback panele.
 """
