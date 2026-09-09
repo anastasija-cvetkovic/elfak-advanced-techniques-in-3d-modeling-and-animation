@@ -77,7 +77,7 @@ Ista mreža, isti cilj (772 trougla, -70%), četiri metode:
 Nijedna metoda nije univerzalno najbolja: na elisi je VTK 7,8× precizniji od `pyfqmr`-a, a na
 torusu je `pyfqmr` bolji (22,32 prema 27,01 u apsolutnim jedinicama). Zato režim `auto` pokreće
 sve kandidate i bira po funkciji `_shape_error`, koja kombinuje geometrijsku grešku, rast
-bbox-a i promašaj ciljnog broja trouglova. Na mrežama iz zadatka to košta oko 110 ms.
+bbox-a i promašaj ciljnog broja trouglova.
 
 Quadric Edge Collapse bira ivicu čije spajanje najmanje odstupa od originalne površine i spaja
 joj temena u jedno, dok se ne dostigne ciljni broj trouglova.
