@@ -195,7 +195,7 @@ python main.py
 
 3ds Max je potreban samo za `.max` fajlove; ASCII fajlovi ne zahtevaju ništa osim Pythona.
 
-Pakovanje u samostalni `.exe` — recept je u `konvertor.spec`:
+Pakovanje u samostalni `.exe` - recept je u `konvertor.spec`:
 
 ```bash
 pyinstaller konvertor.spec
