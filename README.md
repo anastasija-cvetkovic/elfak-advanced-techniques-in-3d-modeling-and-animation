@@ -186,9 +186,6 @@ Windows 11, Python 3.12, ratio 0.5, metoda `auto`:
 | `ARMADILLO.txt` | 172.974 | 345.944 | 0,34 s | 7,07 s | 0,39% |
 | `DRAGON.txt` | 435.545 | 871.306 | 0,94 s | 13,45 s | 0,54% |
 
-Mreže iz zadatka su reda hiljadu trouglova, tamo je ceo tok ispod desetinke sekunde. Stanford
-modeli su uključeni kao provera da aplikacija ne stane na tri reda veličine većem ulazu.
-
 ## Instalacija i pokretanje
 
 ```bash
