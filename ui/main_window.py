@@ -405,10 +405,10 @@ class MainWindow(QMainWindow):
         self.load_worker = None   # LoadWorker
         self.max_worker  = None   # MaxConvertWorker
         self.max_exe     = find_max_exe()
-        self.settings    = QSettings("MeshConverter", "App")
+        self.settings    = QSettings("MaxMeshDecimator", "App")
         self._fullscreen_viewer = False
 
-        self.setWindowTitle("3DS Max → ASCII Konvertor")
+        self.setWindowTitle("Max Mesh Decimator")
         self.resize(1140, 700)
         self.setMinimumSize(900, 560)
 

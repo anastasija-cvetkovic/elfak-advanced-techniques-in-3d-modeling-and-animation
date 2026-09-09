@@ -32,7 +32,7 @@ _REG_KEYS = [
 
 def _config_path() -> str:
     base = os.environ.get("APPDATA") or os.path.expanduser("~/.config")
-    return os.path.join(base, "MeshConverter", "settings.json")
+    return os.path.join(base, "MaxMeshDecimator", "settings.json")
 
 
 def get_saved_max_exe() -> str | None:
