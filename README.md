@@ -16,16 +16,6 @@ Python 3.12, PyQt6, PyVista/VTK. Testirano na 3ds Max 2027.
 > optimizaciju, smanjivanje broja tačaka ali da konture i osnovna struktura 3D modela
 > ostanu sačuvani.
 
-| # | Zahtev | Status |
-|:-:|--------|--------|
-| 1 | Konverzija `.max` → ASCII | Urađeno. MAXScript export, proveren na 3ds Max 2027 sa zadatim `1.max` |
-| 2 | Smanjenje broja tačaka uz očuvanje kontura | Urađeno. Četiri metode, izbor merenjem geometrijske greške |
-| 3 | Rad sa oba data primera | Urađeno. `TORUS.txt` i `elisa.txt` prolaze ceo tok |
-| 4 | 3D prikaz | Urađeno. Original i decimirani, tri režima prikaza |
-
-Težina je u zahtevu 2: nije dovoljno smanjiti broj trouglova, treba to uraditi tako da silueta
-ostane ista. Zato aplikacija svaku decimaciju i izmeri, a greška se prikazuje korisniku.
-
 ## ASCII format
 
 ```
@@ -36,19 +26,6 @@ ostane ista. Zato aplikacija svaku decimaciju i izmeri, a greška se prikazuje k
 0  1  2                   ← indeksi temena trougla, 0-based (2574 reda)
 ...
 ```
-
-Nema zaglavlja ni komentara, lista trouglova počinje tačno na liniji `2 + nv`. Tri detalja koja
-parser mora da poštuje, a koja se iz same specifikacije ne vide:
-
-- Separator nije konzistentan. `TORUS.txt` koristi razmak, `elisa.txt` tab, pa se deli po bilo
-  kom belom znaku.
-- Nisu sve deklarisane tačke upotrebljene. `elisa.txt` deklariše 1.317 tačaka, a u trouglovima
-  koristi 1.281; 36 tačaka nije vezano ni za jedan trougao.
-- Model nije jedan zatvoren manifold. `elisa.txt` ima četiri odvojene komponente (575, 236, 235
-  i 235 tačaka). To je ulazno ograničenje s kojim se radi, ne greška.
-
-Učitavanje i upis idu preko `numpy.loadtxt` / `savetxt`, bez Python petlji. `DRAGON.txt` od
-33 MB (435.545 tačaka) učita se za 0,94 s.
 
 ## Rezultati decimacije
 
@@ -63,9 +40,6 @@ Učitavanje i upis idu preko `numpy.loadtxt` / `savetxt`, bez Python petlji. `DR
 | -70% | 389 | 772 | 1,69% | nepromenjen |
 | -90% | 139 | 256 | 4,58% | nepromenjen |
 
-Lopatice, glavčina i centralni otvor prepoznatljivi su i na -90%, gde je ostalo svega 10%
-originalnih trouglova.
-
 ### `TORUS.txt`
 
 <img src="docs/img/torus-levels.png" alt="Torus kroz nivoe decimacije" width="100%">
@@ -76,10 +50,6 @@ originalnih trouglova.
 | -50% | 120 | 240 | 4,87% | 0 |
 | -70% | 72 | 144 | 6,49% | 0 |
 | -90% | 24 | 48 | 16,54% | 0 |
-
-Torus je zatvoren torus (`V − E + F = 0`, genus 1), pa služi i kao provera topologije:
-karakteristika ostaje `0`, dakle rupa u sredini nije „zatvorena" ni na najagresivnijem nivou.
-Greška je veća nego kod elise jer je površina glatko zakrivljena, bez ravnih delova.
 
 ### Kako se greška meri
 
@@ -103,10 +73,6 @@ Ista mreža, isti cilj (772 trougla, -70%), četiri metode:
 | VTK `decimate_pro` (`vtk_pro`) | 380 v / 772 f | 2,26% | 0,00 |
 | pyfqmr (`pyfqmr`) | 588 v / 1.188 f | 13,21% | 7,32 |
 | Vertex clustering (`cluster`) | 80 v / 182 f | 7,34% | 0,00 |
-
-`decimate_pro` samo uklanja postojeća temena i nikad ih ne pomera, pa nijedna nova tačka ne
-može da izađe van siluete, otud rast bbox-a 0,00. `pyfqmr` ne dostiže cilj i vidno deformiše
-lopatice, a clustering glavčinu svodi na blok.
 
 Nijedna metoda nije univerzalno najbolja: na elisi je VTK 7,8× precizniji od `pyfqmr`-a, a na
 torusu je `pyfqmr` bolji (22,32 prema 27,01 u apsolutnim jedinicama). Zato režim `auto` pokreće
@@ -294,19 +260,5 @@ i slike iz ovog README-a:
 python generate_examples.py
 python docs/make_figures.py
 ```
-
-Slike nisu crtane na ruku. Svaka je render pravog rezultata iz `core/`, sa brojevima izmerenim u
-tom istom pokretanju.
-
-## Poznata ograničenja
-
-- Torus na -90% (24 temena) ima grešku 16,54% i rast bbox-a 4,69. Na toliko maloj rezoluciji
-  glatka zakrivljena površina se ne može verno predstaviti.
-- Headless konverzija (`3dsmaxbatch.exe`) je neupotrebljiva na edukacionoj licenci. Kod za nju
-  postoji, ali se koristi vidljivi Max.
-- 36 nevezanih tačaka iz `elisa.txt` prenosi se u izlaz. Njihovo čišćenje pre decimacije ne
-  menja rezultat, VTK i `pyfqmr` ih sami ignorišu.
-
----
 
 <sub>Master studije, Napredne tehnike u 3D modeliranju i animaciji · Elektronski fakultet u Nišu</sub>
