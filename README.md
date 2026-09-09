@@ -195,60 +195,9 @@ python main.py
 
 3ds Max je potreban samo za `.max` fajlove; ASCII fajlovi ne zahtevaju ništa osim Pythona.
 
-Pakovanje u samostalni `.exe` - recept je u `konvertor.spec`:
-
 ```bash
 pyinstaller konvertor.spec
 python package_release.py
-```
-
-Prvi korak pravi `dist/Max Mesh Decimator/`, drugi od toga sklapa ZIP sa primerima i
-uputstvom. Namerno `--onedir`, ne `--onefile`: PyQt6 i VTK su nekoliko stotina megabajta, pa bi
-onefile pri svakom pokretanju raspakivao sve u temp, a VTK-ovi native DLL-ovi u tom režimu često
-ni ne prođu učitavanje.
-
-Tri stvari koje u spakovanoj verziji rade drugačije nego iz izvornog koda, sve kroz `core/paths.py`:
-
-| | izvorni kod | `.exe` |
-|---|---|---|
-| `styles.qss`, `export_ascii.ms` | koren projekta | `sys._MEIPASS` (privremen, briše se po izlasku) |
-| `settings.json`, `crash.log` | `%APPDATA%\MaxMeshDecimator\` | isto — `_MEIPASS` ne bi preživeo gašenje |
-| podproces za decimaciju | `python core/decimate_proc.py` | `<exe> --decimate-worker` |
-| okruženje za 3ds Max | `os.environ` | `clean_env()` — bez Qt promenljivih |
-
-Podproces je najosetljiviji: `sys.executable` u spakovanoj verziji je sama aplikacija, pa bi
-stara komanda pokrenula drugu kopiju GUI-ja umesto radnika. Zato `main.py` zastavicu hvata pre
-nego što napravi `QApplication`.
-
-Provera spakovane verzije:
-
-```bash
-"dist/Max Mesh Decimator/Max Mesh Decimator.exe" --selftest
-```
-
-Prolazi kroz uvoze redom od numpy-ja do `pyvistaqt`, pa renderuje sferu offscreen i broji koliko
-piksela nije pozadina. Izveštaj ide u `%APPDATA%\MaxMeshDecimator\selftest.txt` jer GUI build nema
-konzolu. Postoji zato što `viewer_widget` neuspeli uvoz PyVista-e hvata i prelazi na prazne
-panele — aplikacija se normalno otvori, samo bez 3D prikaza, i iz samog builda se ne vidi zašto.
-
-Dve zamke pri pakovanju, obe otkrivene tek na spakovanoj verziji:
-
-`pooch` liči na alat za preuzimanje primera koji se u `excludes` može izbaciti, ali ga
-`import pyvista` povlači bezuslovno — bez njega ceo 3D prikaz tiho otkaže. `pandas` i `pyarrow`,
-suprotno, nisu potrebni i njihovo izbacivanje skida ~60 MB.
-
-PyInstaller-ov runtime hook za PyQt6 upisuje `QT_PLUGIN_PATH` i `QML2_IMPORT_PATH` u okruženje
-procesa i gura `_internal` na početak `PATH`-a. Sve to nasleđuje svaki podproces — a 3ds Max je i
-sam Qt aplikacija, pa je startovao sa **našim** Qt-om i padao uz „Startup Failure Detection".
-Zato `converter.py` Max pokreće sa `clean_env()`, ne sa `os.environ`. Podproces decimacije je
-izuzetak: to je ista ova aplikacija i te promenljive su joj potrebne.
-
-Test ASCII mreže (sfera, cilindar, konus, Möbius, torus, plus Stanford modeli ako ima interneta)
-i slike iz ovog README-a:
-
-```bash
-python generate_examples.py
-python docs/make_figures.py
 ```
 
 <sub>Master studije, Napredne tehnike u 3D modeliranju i animaciji · Elektronski fakultet u Nišu</sub>
