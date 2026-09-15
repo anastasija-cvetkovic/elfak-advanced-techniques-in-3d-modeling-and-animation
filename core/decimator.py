@@ -197,33 +197,35 @@ def _try_vtk(
         return None
 
 
-def _vertex_clustering(
-    verts: np.ndarray, faces: np.ndarray, target_verts: int
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Vertex clustering — fallback bez dodatnih biblioteka. Grupiše tačke u
-    voksel grid i zamenjuje ih centroidima.
-    """
+_CLUSTER_MAX_SIDE = 4096  # gornja granica rezolucije grida (4096³ staje u int64)
+
+
+def _cell_ids(verts: np.ndarray, n_side: int) -> np.ndarray:
+    """Linearni indeks voksel ćelije za svako teme, pri rezoluciji `n_side`."""
     bbox_min  = verts.min(axis=0)
-    bbox_max  = verts.max(axis=0)
-    bbox_size = bbox_max - bbox_min
+    bbox_size = verts.max(axis=0) - bbox_min
     bbox_size[bbox_size == 0] = 1.0
 
-    n_side = max(2, int(np.cbrt(target_verts)))
+    cell_idx = np.floor((verts - bbox_min) / bbox_size * n_side).astype(np.int64)
+    np.clip(cell_idx, 0, n_side - 1, out=cell_idx)   # tačke na max granici
 
-    cell_idx = np.floor(
-        (verts - bbox_min) / bbox_size * (n_side - 1)
-    ).astype(np.int32)
-    cell_id = (
+    return (
         cell_idx[:, 0] * n_side * n_side
         + cell_idx[:, 1] * n_side
         + cell_idx[:, 2]
     )
 
+
+def _cluster_at(
+    verts: np.ndarray, faces: np.ndarray, n_side: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Jedan prolaz klasterovanja pri fiksnoj rezoluciji grida."""
+    unique_ids, inverse = np.unique(_cell_ids(verts, n_side), return_inverse=True)
+    inverse = inverse.ravel()
+
     # Centroidi po ćeliji
-    unique_ids, inverse = np.unique(cell_id, return_inverse=True)
     new_verts = np.zeros((len(unique_ids), 3), dtype=np.float64)
-    counts    = np.zeros(len(unique_ids), dtype=np.int32)
+    counts    = np.zeros(len(unique_ids), dtype=np.int64)
     np.add.at(new_verts, inverse, verts)
     np.add.at(counts,    inverse, 1)
     new_verts /= counts[:, None]
@@ -231,12 +233,72 @@ def _vertex_clustering(
     # Remapovanje face indeksa
     new_faces = inverse[faces].astype(np.int32)
 
-    # Uklanjanje degenerisanih trouglova (dve/tri tačke ista ćelija)
+    # Uklanjanje degenerisanih trouglova (dve/tri tačke u istoj ćeliji)
     mask = (
         (new_faces[:, 0] != new_faces[:, 1])
         & (new_faces[:, 1] != new_faces[:, 2])
         & (new_faces[:, 0] != new_faces[:, 2])
     )
     new_faces = new_faces[mask]
+
+    # Deduplikacija: više originalnih trouglova može da padne na isti trojac.
+    # Ključ je sortiran trojac, ali vraćamo originalne redove da se ne pokvari
+    # orijentacija (winding).
+    if len(new_faces):
+        _, keep = np.unique(np.sort(new_faces, axis=1), axis=0, return_index=True)
+        new_faces = new_faces[np.sort(keep)]
+
+    return new_verts, new_faces
+
+
+def _vertex_clustering(
+    verts: np.ndarray, faces: np.ndarray, target_verts: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Vertex clustering — fallback bez dodatnih biblioteka. Grupiše tačke u
+    voksel grid i zamenjuje ih centroidima.
+
+    Rezolucija grida se traži binarnom pretragom umesto zatvorenom formulom:
+    mesh je površ, pa broj zauzetih ćelija raste kao n_side², a konstanta
+    proporcionalnosti zavisi od modela. `cbrt(target)` je zato promašivao
+    ciljni broj temena i po red veličine.
+    """
+    target_verts = max(4, int(target_verts))
+
+    # Traži se najmanji n_side čiji broj zauzetih ćelija dostiže target.
+    # Dovoljno je brojati ćelije — centroidi i remapovanje se rade jednom, na kraju.
+    def n_cells(n_side: int) -> int:
+        return len(np.unique(_cell_ids(verts, n_side)))
+
+    # 1) Udvostručavanje dok se ne pređe target (bez heuristike o obliku modela).
+    lo, hi = 2, 2
+    while n_cells(hi) < target_verts and hi < _CLUSTER_MAX_SIDE:
+        lo = hi
+        hi = min(hi * 2, _CLUSTER_MAX_SIDE)
+
+    # 2) Binarna pretraga u nađenom opsegu; pamti se najbliži viđeni kandidat,
+    #    jer gridovi različitih rezolucija nisu ugnježdeni pa broj ćelija ume
+    #    da odstupi od savršene monotonosti.
+    best_side, best_gap = hi, abs(n_cells(hi) - target_verts)
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        got = n_cells(mid)
+        gap = abs(got - target_verts)
+        if gap < best_gap or (gap == best_gap and mid < best_side):
+            best_side, best_gap = mid, gap
+        if got < target_verts:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+
+    new_verts, new_faces = _cluster_at(verts, faces, best_side)
+
+    # 3) Guard: pri vrlo agresivnoj redukciji sve može da se sruči u nekoliko
+    #    ćelija i ne ostane nijedan trougao. Podiže se rezolucija dok mesh ne
+    #    postane validan — bolje promašiti target nego vratiti prazan model.
+    side = best_side
+    while len(new_faces) == 0 and side < _CLUSTER_MAX_SIDE:
+        side = min(side * 2, _CLUSTER_MAX_SIDE)
+        new_verts, new_faces = _cluster_at(verts, faces, side)
 
     return new_verts, new_faces
