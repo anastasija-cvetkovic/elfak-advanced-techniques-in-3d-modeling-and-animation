@@ -37,6 +37,7 @@ hiddenimports = [
 
 datas = [
     ("ui/styles.qss", "ui"),          # main.py — QSS stil
+    ("ui/icon.ico", "ui"),            # main.py — ikonica prozora
     ("core/export_ascii.ms", "core"),  # main_window.py — skripta za 3ds Max
     *collect_data_files("pyvista"),
 ]
@@ -81,6 +82,7 @@ exe = EXE(
     strip=False,
     upx=False,          # UPX kvari VTK/Qt DLL-ove
     console=False,      # GUI aplikacija — bez konzolnog prozora
+    icon="ui/icon.ico",  # ikonica .exe-a
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

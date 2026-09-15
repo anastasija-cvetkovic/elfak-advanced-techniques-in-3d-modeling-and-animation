@@ -18,6 +18,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
 
     sys.exit(run())
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 from core.paths import resource_path, user_data_dir
@@ -34,6 +35,11 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Max Mesh Decimator")
     app.setOrganizationName("MaxMeshDecimator")
+
+    # Ikonica (docs/make_icon.py) — prozor i traka zadataka
+    icon_path = resource_path("ui", "icon.ico")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     # Učitavanje QSS stila
     qss_path = resource_path("ui", "styles.qss")

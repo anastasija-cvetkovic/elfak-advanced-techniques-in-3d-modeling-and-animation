@@ -1,4 +1,4 @@
-﻿# Max Mesh Decimator
+﻿# <img src="docs/img/icon.png" alt="Ikonica aplikacije" width="26" align="top"> Max Mesh Decimator
 
 Desktop aplikacija koja konvertuje `.max` scene u ASCII zapis trougaone mreže, decimira mrežu
 tako da konture modela ostanu sačuvane i prikazuje rezultat pored originala u 3D.
@@ -153,8 +153,11 @@ flowchart LR
 ├── ui/
 │   ├── main_window.py        ← glavni prozor, workeri, drag&drop
 │   ├── viewer_widget.py      ← dva PyVista panela (before/after)
-│   └── styles.qss            ← tamna tema
-├── docs/make_figures.py      ← generiše slike iz ovog README-a
+│   ├── styles.qss            ← tamna tema
+│   └── icon.ico              ← ikonica prozora i .exe-a
+├── docs/
+│   ├── make_figures.py       ← generiše slike iz ovog README-a
+│   └── make_icon.py          ← generiše ui/icon.ico
 ├── generate_examples.py      ← test ASCII fajlovi
 ├── konvertor.spec            ← PyInstaller recept
 ├── package_release.py        ← sklapa ZIP za isporuku
