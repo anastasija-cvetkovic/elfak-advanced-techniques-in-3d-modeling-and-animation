@@ -122,7 +122,7 @@ i izabrati ručno (izbor se pamti).
 
 1. Učitaj: prevuci `.txt` u zonu ili klikni za dijalog; za `.max` fajlove postoji dugme
    *Učitaj .max fajl*.
-2. Podesi: slajder je jačina smanjenja (5-95%), radio dugmad su metoda.
+2. Podesi: slajder je stepen redukcije (5-95%), radio dugmad su metoda.
 3. Pokreni: *Konvertuj i prikaži*.
 4. Pregledaj: original levo, decimirani desno.
 5. Sačuvaj: ASCII `.txt` (isti format kao ulaz) ili `.obj`.

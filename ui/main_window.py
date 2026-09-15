@@ -498,11 +498,11 @@ class MainWindow(QMainWindow):
     def _section_optimization(self):
         w = QWidget(); w.setStyleSheet("background:transparent;")
         lv = QVBoxLayout(w); lv.setContentsMargins(0, 0, 0, 0); lv.setSpacing(10)
-        lv.addWidget(_section_label("OPTIMIZACIJA MREŽE"))
+        lv.addWidget(_section_label("REDUKCIJA MREŽE"))
 
         # Stilovi ovih labela su u styles.qss radi :disabled varijante.
         row = QHBoxLayout()
-        lbl = QLabel("Jačina smanjenja")
+        lbl = QLabel("Stepen redukcije")
         lbl.setObjectName("optLabel")
         self.lbl_ratio = QLabel("−70%")
         self.lbl_ratio.setObjectName("ratioPill")

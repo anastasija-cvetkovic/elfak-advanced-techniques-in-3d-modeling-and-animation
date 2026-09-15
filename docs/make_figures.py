@@ -85,7 +85,7 @@ def panel(plotter, verts, faces, title, original=False, zoom=1.45):
 # ── figure ───────────────────────────────────────────────────────────────────
 
 def levels(mesh: Path, out_name: str, ratios=(1.0, 0.5, 0.3, 0.1)) -> None:
-    """Isti model kroz nekoliko jačina decimacije."""
+    """Isti model kroz nekoliko stepena redukcije."""
     v0, f0 = load_mesh(str(mesh))
     p = pv.Plotter(shape=(1, len(ratios)), window_size=(1680, 400),
                    off_screen=True, border=False)
